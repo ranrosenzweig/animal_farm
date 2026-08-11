@@ -5,6 +5,14 @@ import { MUD, POND } from "./model/pasture.js";
 import { sourceOf } from "./sources.js";
 
 /**
+ * How long one step takes. The sprite's CSS transition is driven from this
+ * same number, so an animal is still gliding into its last spot exactly as
+ * the next step is decided — the walk looks continuous instead of a dart
+ * followed by a wait.
+ */
+const STEP_MS = 600;
+
+/**
  * A live view of the farm model. Every piece of information on screen is
  * read off the model — the head counts, the attribute card, the daily
  * yield and the source panel all come from the classes in src/model.
@@ -30,7 +38,7 @@ export default function FarmModel() {
 
   useEffect(() => {
     if (!roaming) return undefined;
-    const timer = window.setInterval(() => setFarm(farmRef.current.stepAll().farm), 900);
+    const timer = window.setInterval(() => setFarm(farmRef.current.stepAll().farm), STEP_MS);
     return () => window.clearInterval(timer);
   }, [roaming]);
 
@@ -79,7 +87,7 @@ export default function FarmModel() {
   }
 
   return (
-    <div className="farm-app">
+    <div className="farm-app" style={{ "--step-duration": `${STEP_MS}ms` }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap');
 
@@ -191,8 +199,12 @@ export default function FarmModel() {
           align-items: center;
           padding: 0;
           animation: bob 2.6s ease-in-out infinite;
-          /* the model relocates the animal; the walk between spots is ours */
-          transition: left 0.55s ease-in-out, top 0.55s ease-in-out;
+          /* The model relocates the animal; the walk between spots is ours.
+             Linear, and exactly as long as a step, so an animal that keeps
+             walking never visibly stops between steps. */
+          transition:
+            left var(--step-duration, 600ms) linear,
+            top var(--step-duration, 600ms) linear;
         }
         @media (prefers-reduced-motion: reduce) {
           .fa-sprite { transition: none; animation: none; }

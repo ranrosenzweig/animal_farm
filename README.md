@@ -68,18 +68,28 @@ that neither half has to know too much:
 
 - The **animal** picks a direction. `heading(context)` is where each species'
   temperament lives — the pig makes for the mud, the duck for the pond, the
-  sheep for the middle of the flock, the horse runs the fence line and turns
-  around at the end, the chicken turns hard every step and traces a circle,
+  sheep for the middle of the flock, the horse runs the fence line and comes
+  about at the end, the chicken bears constantly left and traces a circle,
   the cow plods to the nearest fence and grazes along it.
 - The **farm** grants the ground. Only `Farm` can see everyone, so only `Farm`
   decides. `isClear(point, mover)` is the rule itself: inside the fence, and no
   further into anyone's personal space than `a.radius + b.radius` allows.
 
-`Farm.step(id)` asks the animal where it wants to go, then tries that heading,
-then swerves of ±0.4, ±0.8 … radians to either side, then the same fan at 60%
-and 35% of a stride. The first spot that is clear wins. If every one of them is
-blocked, the animal doesn't move and `step` reports `moved: false` — it stays
-put rather than pushing through.
+### Forward only
+
+Animals don't strafe. Each one has a `facing` and walks along it; `heading()`
+is only a *wish*, and `turnToward()` grants at most `turnRate` radians of it per
+step. Changing direction is therefore an arc, not a jump, and how tight an arc
+is itself a species trait — `turningCircle` is just `stepSize / turnRate`, which
+is why a galloping horse (20 units) starts its turn a long way before the fence
+while a chicken (2.5) can spin almost on the spot.
+
+`Farm.step(id)` turns the animal, then walks it forward. When the ground ahead
+is taken it may shade the line by up to one more `turnRate` or shorten the
+stride, but it may not step around — so a blocked animal **stays where it is**,
+having turned a little, and tries a fresh line next step (`moved: false`, logged
+as "hemmed in"). Repeated balks widen its `veer`, so it works its way around an
+obstacle over several steps and then settles back onto its heading.
 
 ```js
 const { farm, moved } = farm.step(someId);   // one animal
@@ -87,19 +97,28 @@ const { farm, moved } = farm.stepAll();      // everyone, in turn; moved = how m
 farm.overlaps();                             // always [] — the invariant
 ```
 
+`npm run check` audits all of it — overlaps, the fence, stride length, and that
+every step lands within a turn's worth of where the animal was already pointed:
+
+```
+Placed 44 of 90 animals; 46 turned away for lack of room.
+Walked 200 rounds: 2252/8800 steps found room (26%); the rest were hemmed in.
+Sharpest step taken was 1.20 rad off the animal's facing.
+OK — nobody overlapped, left the field, sidestepped, or outran its stride.
+```
+
+That 26% is a deliberately overstocked field. At a normal six head it's ~83%.
+
 Placement obeys the same rule: `Farm.add()` looks for a free spot and, if the
 pasture is full, **turns the animal away** (`added: false`) rather than stacking
-it on one already there. `npm run check` overstocks the field and audits every
-round:
+it on one already there.
 
-```
-Placed 45 of 90 animals; 45 turned away for lack of room.
-Walked 200 rounds: 5719/9000 steps found room (64%); the rest were hemmed in.
-OK — no animal ever stood on another, and none left the field.
-```
-
-`stepSize` and `radius` are static per species, so a horse covers 20 units at a
-gallop while a chicken scurries 5, and a cow needs more elbow room than a duck.
+`stepSize` and `radius` are static per species. A step is deliberately a small
+movement — the field is ~84 units across, and a cow plods 1.8 of them at a time,
+so crossing it takes it the better part of fifty steps. A galloping horse covers
+6, still three times anything else. The UI ticks a step every `STEP_MS` (600ms)
+and runs the sprite's CSS transition for exactly that long, linearly, so a
+walking animal never visibly stops between steps.
 
 ## Adding a species
 

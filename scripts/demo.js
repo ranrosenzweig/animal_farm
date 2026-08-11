@@ -28,11 +28,19 @@ for (const item of farm.dailyProduce()) {
 
 // Each species wants to go somewhere different: the pig makes for the mud,
 // the duck for the pond, the sheep for the flock, the horse down the fence.
-console.log("\nFive rounds of roaming (start → end):");
-const start = new Map(farm.animals.map((a) => [a.id, at(a)]));
-for (let round = 0; round < 5; round++) farm = farm.stepAll().farm;
+// A step is small, so it takes a good many of them to get anywhere.
+const ROUNDS = 20;
+console.log(`\n${ROUNDS} rounds of roaming (start → end, ${ROUNDS} steps each):`);
+const start = new Map(farm.animals.map((a) => [a.id, { at: at(a), x: a.x, y: a.y }]));
+for (let round = 0; round < ROUNDS; round++) farm = farm.stepAll().farm;
 for (const a of farm.animals) {
-  console.log(`  ${a.emoji} ${a.name.padEnd(10)} ${start.get(a.id).padEnd(10)} → ${at(a)}`);
+  const from = start.get(a.id);
+  const travelled = Math.hypot(a.x - from.x, a.y - from.y).toFixed(0);
+  console.log(
+    `  ${a.emoji} ${a.name.padEnd(10)} ${from.at.padEnd(10)} → ${at(a).padEnd(10)}` +
+    ` ${travelled.padStart(2)} units in ${ROUNDS} steps` +
+    ` (stride ${a.stepSize}, turns ≤${a.turnRate}/step)`
+  );
 }
 
 // Nobody may stand on anyone else — the farm enforces it, not the animal.

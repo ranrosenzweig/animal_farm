@@ -9,8 +9,9 @@ export default class Horse extends Animal {
   static diet = ["oats", "apples", "carrots"];
   static breeds = ["Appaloosa", "Clydesdale", "Mustang", "Arabian"];
   static names = ["Comet", "Thunder", "Bella", "Apollo", "Storm"];
-  static stepSize = 20;  // covers ground at a gallop
+  static stepSize = 6;    // covers ground at a gallop — still the fastest thing here
   static radius = 5.5;
+  static turnRate = 0.3;  // committed to its line; comes about in a wide arc
 
   constructor(name, breed, age) {
     super(name, breed, age);
@@ -21,10 +22,14 @@ export default class Horse extends Animal {
   makeSound() { return `${this.name} gives a proud "Neigh!"`; }
   move() { return `${this.name} gallops the length of the fence line.`; }
 
-  /** Runs the length of the field and turns around at either end. */
+  /**
+   * Runs the length of the field. It cannot spin on the spot, so it begins
+   * to come about a full turning circle before the end — otherwise it would
+   * arrive at the fence still pointed straight at it.
+   */
   heading() {
-    if (this.x >= PASTURE.maxX - this.stepSize) this.direction = -1;
-    else if (this.x <= PASTURE.minX + this.stepSize) this.direction = 1;
+    if (this.x >= PASTURE.maxX - this.turningCircle) this.direction = -1;
+    else if (this.x <= PASTURE.minX + this.turningCircle) this.direction = 1;
     return this.direction === 1 ? 0 : Math.PI;
   }
 

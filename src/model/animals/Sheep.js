@@ -1,5 +1,5 @@
 import Animal from "../Animal.js";
-import { randomAngle, randomInt } from "../random.js";
+import { randomInt } from "../random.js";
 import { centroid } from "../pasture.js";
 
 export default class Sheep extends Animal {
@@ -9,8 +9,9 @@ export default class Sheep extends Animal {
   static diet = ["grass", "oats", "alfalfa"];
   static breeds = ["Merino", "Suffolk", "Dorset", "Romney"];
   static names = ["Shirley", "Woolly", "Dolly", "Fleece", "Barbara"];
-  static stepSize = 7;   // a shuffle
+  static stepSize = 2.2;  // a shuffle
   static radius = 5;
+  static turnRate = 0.3;
 
   constructor(name, breed, age) {
     super(name, breed, age);
@@ -26,7 +27,7 @@ export default class Sheep extends Animal {
    */
   heading({ neighbors = [] } = {}) {
     const flock = centroid(neighbors.filter((a) => a.species === this.species));
-    return flock ? this.headingToward(flock) : randomAngle();
+    return flock ? this.headingToward(flock) : this.amble();
   }
 
   getAttributes() {

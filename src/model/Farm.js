@@ -17,13 +17,14 @@ import { randomInt } from "./random.js";
  */
 export default class Farm {
   /**
-   * Detours tried, in order, when the direction an animal wants is blocked:
-   * straight ahead first, then wider and wider swerves to either side, and
-   * finally straight back the way it came.
+   * Lines tried when the way ahead is blocked, as fractions of the animal's
+   * own turn rate: dead ahead first, then the slightest lean to either side.
+   * Nothing here exceeds ±1 turn rate, so an animal can never sidestep or
+   * back up — the most it can do is shade the line it was already walking.
    */
-  static DETOURS = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2.2, -2.2, Math.PI];
+  static NUDGES = [0, 0.5, -0.5, 1, -1];
 
-  /** Step lengths tried at each detour: full stride, then shorter shuffles. */
+  /** Step lengths tried on each line: full stride, then shorter ones. */
   static STRIDES = [1, 0.6, 0.35];
 
   /**
@@ -97,24 +98,32 @@ export default class Farm {
   }
 
   /**
-   * Walk one animal one step, in place. It heads where it wants to go; if
-   * another animal is already there it swerves, and if every way out is
-   * blocked it stays put.
+   * Walk one animal one step, in place.
+   *
+   * It turns as far toward where it wants to go as its neck allows, then
+   * walks *forward* along the facing it ends up with. If the ground ahead is
+   * taken it may shade the line very slightly or shorten the stride, but it
+   * cannot step around the obstacle — so a blocked animal stays where it is,
+   * having turned a little, and tries a fresh line next step.
+   *
    * @returns {boolean} whether it found anywhere to go
    * @private
    */
   stepOne(mover) {
     const neighbors = this.animals.filter((a) => a !== mover);
-    const desired = mover.heading({ neighbors, farm: this });
+    const facing = mover.turnToward(mover.heading({ neighbors, farm: this }));
 
     for (const stride of Farm.STRIDES) {
-      for (const detour of Farm.DETOURS) {
-        const spot = mover.positionAfter(desired + detour, mover.stepSize * stride);
+      for (const nudge of Farm.NUDGES) {
+        const angle = facing + nudge * mover.turnRate;
+        const spot = mover.positionAfter(angle, mover.stepSize * stride);
         if (!this.isClear(spot, mover)) continue;
-        mover.moveTo(spot);
+        mover.advanceTo(spot, angle);
+        mover.settle();
         return true;
       }
     }
+    mover.balk();
     return false;
   }
 

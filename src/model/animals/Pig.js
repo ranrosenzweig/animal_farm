@@ -9,8 +9,9 @@ export default class Pig extends Animal {
   static diet = ["slops", "acorns", "sweet potatoes"];
   static breeds = ["Yorkshire", "Duroc", "Hampshire", "Berkshire"];
   static names = ["Wilbur", "Babe", "Hamlet", "Peppa", "Truffle"];
-  static stepSize = 11;  // a purposeful trot
+  static stepSize = 3.2;   // a purposeful trot
   static radius = 5;
+  static turnRate = 0.35;
 
   constructor(name, breed, age) {
     super(name, breed, age);

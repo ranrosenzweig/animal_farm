@@ -9,8 +9,9 @@ export default class Duck extends Animal {
   static diet = ["pond weed", "cracked corn", "duckweed"];
   static breeds = ["Mallard", "Pekin", "Rouen", "Khaki Campbell"];
   static names = ["Quackers", "Puddles", "Donald", "Waddle", "Mallory"];
-  static stepSize = 9;   // an unhurried waddle
+  static stepSize = 2.8;   // an unhurried waddle
   static radius = 4.5;
+  static turnRate = 0.45;  // waddles round quickly enough
 
   constructor(name, breed, age) {
     super(name, breed, age);

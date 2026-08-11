@@ -15,6 +15,12 @@ export const MUD = { x: 68, y: 62 };
 
 export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
+/** Fold an angle into (-π, π]. */
+export const normalizeAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** The shortest turn from `from` to `to`, signed: negative is one way, positive the other. */
+export const angleDifference = (to, from) => normalizeAngle(to - from);
+
 export const inBounds = ({ x, y }) =>
   x >= PASTURE.minX && x <= PASTURE.maxX && y >= PASTURE.minY && y <= PASTURE.maxY;
 
