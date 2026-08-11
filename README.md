@@ -267,6 +267,10 @@ distinctively — add it to `SPECIES` in `src/model/species.js`, and add its
 `?raw` import in `src/sources.js` if you want it in the source viewer. The UI
 picks it up with no further changes.
 
+The full procedure for species, goals, drives and resource kinds — including
+the steps that fail *silently* — lives in
+[.claude/skills/extending-the-farm/](.claude/skills/extending-the-farm/SKILL.md).
+
 ## Adding a mind
 
 Subclass `Mind`, implement `decide(percept)`, set a `cadence`, and assign it:
