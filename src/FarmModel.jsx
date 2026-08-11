@@ -50,6 +50,7 @@ export default function FarmModel() {
   const produce = farm.dailyProduce();
   const activity = farm.activity();
   const stock = farm.stock();
+  const expecting = farm.animals.filter((a) => a.isPregnant).length;
 
   // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
   // the current farm through a ref rather than a state updater — React invokes
@@ -259,8 +260,25 @@ export default function FarmModel() {
           .fa-sprite { transition: none; animation: none; }
         }
         .fa-sprite .emoji {
+          position: relative;
           font-size: 30px;
           filter: drop-shadow(0 3px 2px rgba(0,0,0,0.3));
+        }
+        /* An expecting female is marked twice: a badge on the animal itself,
+           and a coloured name tag, so she is findable without hunting. */
+        .fa-sprite .expecting {
+          position: absolute;
+          right: -7px;
+          bottom: -3px;
+          font-size: 14px;
+          line-height: 1;
+          text-shadow: 0 0 4px #fff, 0 0 4px #fff, 0 0 4px #fff;
+        }
+        .fa-sprite .tag.expecting {
+          background: #f7dbe4;
+          border-color: var(--barn-red);
+          color: #7d2a1e;
+          font-weight: 600;
         }
         .fa-sprite.selected .emoji {
           transform: scale(1.18);
@@ -579,7 +597,9 @@ export default function FarmModel() {
                 setSelectedId(a.id);
                 setShowSource(false);
               }}
-              title={a.describe()}
+              title={a.isPregnant
+                ? `${a.describe()} Expecting by ${a.pregnancy.by}, ${a.pregnancy.left} steps to go.`
+                : a.describe()}
             >
               {speakingId === a.id && (
                 <div className="fa-bubble">{a.makeSound().split('"')[1] ? `"${a.makeSound().split('"')[1]}"` : "…"}</div>
@@ -587,9 +607,10 @@ export default function FarmModel() {
               {/* Newborns are visibly smaller until they grow up. */}
               <span className="emoji" style={a.isAdult ? undefined : { fontSize: "18px" }}>
                 {a.emoji}
+                {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
-              <span className="tag">
-                {a.name} {SEX_MARKS[a.sex]}{a.isPregnant ? " 🤰" : ""}
+              <span className={"tag" + (a.isPregnant ? " expecting" : "")}>
+                {a.name} {SEX_MARKS[a.sex]}
               </span>
             </button>
           ))}
@@ -719,6 +740,11 @@ export default function FarmModel() {
                     {GOAL_ICONS[a.goal] ?? "•"} {a.count} {a.goal}
                   </span>
                 ))}
+            {expecting > 0 && (
+              <span className="item" style={{ color: "#7d2a1e" }}>
+                🤰 {expecting} expecting
+              </span>
+            )}
           </div>
 
           <div className="fa-yield">
