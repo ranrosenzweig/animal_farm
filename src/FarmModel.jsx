@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
+import { MUD, POND } from "./model/pasture.js";
 import { sourceOf } from "./sources.js";
 
 /**
@@ -15,10 +16,23 @@ export default function FarmModel() {
   const [speakingId, setSpeakingId] = useState(null);
   const [addSpecies, setAddSpecies] = useState(SPECIES[0].species);
   const [showSource, setShowSource] = useState(false);
+  const [roaming, setRoaming] = useState(false);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const census = farm.census();
   const produce = farm.dailyProduce();
+
+  // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
+  // the current farm through a ref rather than a state updater — React invokes
+  // updaters twice under StrictMode, which would step everyone twice a tick.
+  const farmRef = useRef(farm);
+  farmRef.current = farm;
+
+  useEffect(() => {
+    if (!roaming) return undefined;
+    const timer = window.setInterval(() => setFarm(farmRef.current.stepAll().farm), 900);
+    return () => window.clearInterval(timer);
+  }, [roaming]);
 
   function pushLog(text, kind) {
     setLog((l) => [{ id: `${Date.now()}-${Math.random()}`, text, kind }, ...l].slice(0, 8));
@@ -26,6 +40,7 @@ export default function FarmModel() {
 
   function runAction(kind) {
     if (!selected) return;
+    if (kind === "move") return walk(selected);
     pushLog(selected[kind](), kind);
     if (kind === "makeSound") {
       setSpeakingId(selected.id);
@@ -34,9 +49,21 @@ export default function FarmModel() {
     }
   }
 
+  /** The farm decides where — or whether — the animal can go. */
+  function walk(animal) {
+    const { farm: next, moved } = farm.step(animal.id);
+    setFarm(next);
+    pushLog(moved ? animal.move() : `${animal.name} is hemmed in and stays put.`, "move");
+  }
+
   function addAnimal() {
     const fresh = speciesNamed(addSpecies).random();
-    setFarm((f) => f.add(fresh));
+    const { farm: next, added } = farm.add(fresh);
+    if (!added) {
+      pushLog(`No room in the pasture for another ${fresh.species.toLowerCase()}.`, "info");
+      return;
+    }
+    setFarm(next);
     setSelectedId(fresh.id);
     setShowSource(false);
     pushLog(`${fresh.name} the ${fresh.species.toLowerCase()} joins the farm.`, "info");
@@ -45,7 +72,7 @@ export default function FarmModel() {
   function removeSelected() {
     if (!selected) return;
     const { id, name, species } = selected;
-    setFarm((f) => f.remove(id));
+    setFarm(farm.remove(id));
     setSelectedId(null);
     setShowSource(false);
     pushLog(`${name} the ${species.toLowerCase()} leaves the pasture.`, "info");
@@ -164,6 +191,11 @@ export default function FarmModel() {
           align-items: center;
           padding: 0;
           animation: bob 2.6s ease-in-out infinite;
+          /* the model relocates the animal; the walk between spots is ours */
+          transition: left 0.55s ease-in-out, top 0.55s ease-in-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fa-sprite { transition: none; animation: none; }
         }
         .fa-sprite .emoji {
           font-size: 30px;
@@ -203,6 +235,23 @@ export default function FarmModel() {
         @keyframes pop {
           from { opacity: 0; transform: translateX(-50%) scale(0.7); }
           to { opacity: 1; transform: translateX(-50%) scale(1); }
+        }
+        .fa-feature {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          border-radius: 50%;
+          pointer-events: none;
+        }
+        .fa-pond {
+          width: 21%; height: 15%;
+          background: radial-gradient(ellipse at 40% 35%, #7fb4d6, #3E7CA6);
+          box-shadow: inset 0 -3px 6px rgba(0,0,0,0.2);
+          opacity: 0.85;
+        }
+        .fa-mud {
+          width: 19%; height: 13%;
+          background: radial-gradient(ellipse at 45% 40%, #7a5b3f, #4a3421);
+          opacity: 0.7;
         }
         .fa-empty {
           position: absolute;
@@ -395,6 +444,8 @@ export default function FarmModel() {
       <div className="fa-body">
         <div className="fa-pasture">
           <div className="fa-barn">🏚️</div>
+          <div className="fa-feature fa-pond" style={{ left: `${POND.x}%`, top: `${POND.y}%` }} />
+          <div className="fa-feature fa-mud" style={{ left: `${MUD.x}%`, top: `${MUD.y}%` }} />
           {farm.animals.map((a) => (
             <button
               key={a.id}
@@ -449,6 +500,14 @@ export default function FarmModel() {
                     {p.label} {p.amount}{p.unit && ` ${p.unit}`}
                   </span>
                 ))}
+            <button
+              className="fa-btn alt"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setRoaming((v) => !v)}
+              disabled={farm.size === 0}
+            >
+              {roaming ? "⏸ Stop roaming" : "▶ Let them roam"}
+            </button>
           </div>
 
           <div className="fa-add">

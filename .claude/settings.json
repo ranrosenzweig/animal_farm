@@ -5,7 +5,11 @@
       "Bash(rm farm-model.jsx)",
       "Bash(npm run *)",
       "Bash(git add *)",
-      "Bash(git -c user.name=Ran -c user.email=ranrosenzweig@gmail.com commit -q -m ' *)"
+      "Bash(git -c user.name=Ran -c user.email=ranrosenzweig@gmail.com commit -q -m ' *)",
+      "Bash(curl -s -o /dev/null -w \"index.html %{http_code}\\\\n\" http://localhost:5174/)",
+      "Bash(curl -s -o /dev/null -w \"main.jsx   %{http_code}\\\\n\" http://localhost:5174/src/main.jsx)",
+      "Bash(curl -s \"http://localhost:5174/src/model/animals/Cow.js?raw\")",
+      "Bash(node -e ' *)"
     ]
   }
 }

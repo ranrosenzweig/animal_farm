@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "demo": "node scripts/demo.js",
+    "check": "node scripts/check.js",
     "build": "vite build",
     "preview": "vite preview"
   },
