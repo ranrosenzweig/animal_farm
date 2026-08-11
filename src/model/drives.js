@@ -6,13 +6,14 @@
  * when it picks a goal. Nothing here knows what an animal will do about being
  * hungry; that is the Mind's business.
  */
-export const DRIVES = ["hunger", "thirst", "fatigue", "loneliness"];
+export const DRIVES = ["hunger", "thirst", "fatigue", "loneliness", "urge"];
 
 export const DRIVE_LABELS = {
   hunger: "Hunger",
   thirst: "Thirst",
   fatigue: "Fatigue",
   loneliness: "Loneliness",
+  urge: "Urge to breed",
 };
 
 export const clamp01 = (n) => Math.min(1, Math.max(0, n));

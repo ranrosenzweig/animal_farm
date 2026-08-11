@@ -56,11 +56,19 @@ export default class Animal {
    * what makes a duck make for the pond and a pig for the mud.
    */
   static affinities = {
-    graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4,
+    graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4, mate: 0.7,
   };
 
   /** @type {Record<string, number>} How fast each drive climbs, per step. */
-  static driveRates = { hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005 };
+  static driveRates = {
+    hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005, urge: 0.003,
+  };
+
+  /** @type {number} Steps a female carries young before giving birth. */
+  static gestation = 300;
+
+  /** @type {number} Steps a newborn takes to grow up and be able to breed. */
+  static maturesAt = 400;
 
   /** @type {number} How fast the relevant drive falls while at a goal. */
   static relief = 0.06;
@@ -103,11 +111,18 @@ export default class Animal {
     /** How far it has swung away from where it wants to go, to get around something. */
     this.veer = 0;
 
+    this.sex = pick(["male", "female"]);
     this.drives = startingDrives();
     /** Condition, 0–1. Falls only while a drive is pinned at its limit. At 0 it dies. */
     this.health = 1;
     /** Which drive finished it off, once it has. */
     this.endedBy = null;
+    /** `{ by, left }` while carrying young, else null. Females only. */
+    this.pregnancy = null;
+    /** Steps lived, which is how a newborn grows up. */
+    this.stepsAlive = 0;
+    /** `{ mother, father, species }` for animals that were born here, else null. */
+    this.parents = null;
     /** What it is currently trying to do, and why. */
     this.intention = { goal: "roam", reason: "newly arrived" };
     /** Whatever decides that. Replaceable per animal. */
@@ -153,8 +168,11 @@ export default class Animal {
       self: {
         name: this.name,
         species: this.species,
+        sex: this.sex,
         goal: this.goal,
         health: this.health,
+        adult: this.isAdult,
+        pregnant: this.isPregnant,
         drives: { ...this.drives },
       },
       // The nearest source of each kind that still has something in it.
@@ -166,7 +184,8 @@ export default class Animal {
           : { kind, distance: null, volume: 0 };
       }),
       options: Object.entries(this.affinities)
-        .filter(([, affinity]) => affinity > 0)
+        // Breeding is simply not on the table for the young or the expecting.
+        .filter(([goal, affinity]) => affinity > 0 && (goal !== "mate" || this.canMate()))
         .map(([goal, affinity]) => ({
           goal,
           affinity,
@@ -232,7 +251,19 @@ export default class Animal {
       this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - relief / 4);
     }
 
+    this.grow();
     this.wear();
+  }
+
+  /**
+   * Time passing: a newborn fills out into an adult, and a female carrying
+   * young gets one step closer to delivering.
+   * @private
+   */
+  grow() {
+    this.stepsAlive += 1;
+    if (this.age === 0 && this.stepsAlive >= this.constructor.maturesAt) this.age = 1;
+    if (this.pregnancy) this.pregnancy.left -= 1;
   }
 
   /**
@@ -270,6 +301,58 @@ export default class Animal {
   /** Why it died, in words. */
   epitaph() {
     return `${this.name} the ${this.species.toLowerCase()} died of ${this.endedBy ?? "unknown causes"}.`;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Breeding                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /** Newborns are age 0 and grow into adults after `maturesAt` steps. */
+  get isAdult() { return this.age >= 1; }
+
+  get isPregnant() { return this.pregnancy != null; }
+
+  /** Grown, alive, and not already carrying. Says nothing about a partner. */
+  canMate() {
+    return this.isAdult && this.isAlive() && !this.isPregnant;
+  }
+
+  /**
+   * Take. Only the Farm calls this, and only once it has checked that the two
+   * are the same species and opposite sexes — an animal cannot verify that
+   * about another on its own.
+   */
+  conceive(sire) {
+    this.pregnancy = { by: sire.name, left: this.constructor.gestation };
+    this.drives.urge = 0;
+    sire.drives.urge = 0;
+  }
+
+  readyToBirth() {
+    return this.isPregnant && this.pregnancy.left <= 0;
+  }
+
+  /**
+   * A newborn of this animal's own species, carrying its mother's breed. It
+   * is not on the field yet — the Farm has to find it somewhere to stand.
+   */
+  newborn() {
+    const baby = new this.constructor(pick(this.constructor.names), this.breed, 0);
+    baby.parents = { mother: this.name, father: this.pregnancy?.by ?? null, species: this.species };
+    return baby;
+  }
+
+  /** The birth is done and the Farm has placed the young one. */
+  delivered() {
+    this.pregnancy = null;
+  }
+
+  /** How a birth reads in the log. */
+  birthNotice() {
+    const to = this.parents
+      ? ` to ${this.parents.mother}${this.parents.father ? ` and ${this.parents.father}` : ""}`
+      : "";
+    return `${this.name}, a ${this.sex} ${this.species.toLowerCase()}, is born${to}.`;
   }
 
   /** True while its goal is one it pursues by standing still. */
@@ -385,14 +468,16 @@ export default class Animal {
   getAttributes() {
     return [
       { label: "Species", value: this.species },
+      { label: "Sex", value: this.sex === "female" ? "♀ female" : "♂ male" },
       { label: "Breed", value: this.breed },
-      { label: "Age", value: `${this.age} yr` },
+      { label: "Age", value: this.isAdult ? `${this.age} yr` : "newborn" },
       { label: "Favorite food", value: this.favoriteFood },
     ];
   }
 
   describe() {
-    return `${this.name} — a ${this.age}-year-old ${this.breed} ${this.species.toLowerCase()}.`;
+    const age = this.isAdult ? `${this.age}-year-old` : "newborn";
+    return `${this.name} — a ${age} ${this.sex} ${this.breed} ${this.species.toLowerCase()}.`;
   }
 
   /** Build a member of this kind with a random name, breed and age. */

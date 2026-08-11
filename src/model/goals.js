@@ -69,6 +69,19 @@ export const GOALS = {
     narrate: (a) => `${a.name} moves in close to the others.`,
   },
 
+  mate: {
+    relieves: "urge",
+    // The nearest animal of its own species, opposite sex, grown, not already
+    // carrying, and looking for the same thing. Only the Farm can judge that,
+    // because only the Farm can see everyone.
+    place: (animal, { farm } = {}) => farm?.nearestMate(animal) ?? null,
+    satisfied: (animal, { farm } = {}) => {
+      const partner = farm?.nearestMate(animal);
+      return partner != null && distance(animal, partner) < animal.radius + partner.radius + 1;
+    },
+    narrate: (a) => `${a.name} goes looking for a mate.`,
+  },
+
   rest: {
     relieves: "fatigue",
     place: () => null,

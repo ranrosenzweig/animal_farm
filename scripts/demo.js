@@ -2,7 +2,8 @@
 //   node scripts/demo.js
 import Farm from "../src/model/Farm.js";
 import Animal from "../src/model/Animal.js";
-import { Cow, Duck, SPECIES } from "../src/model/species.js";
+import { Cow, Duck, Pig, SPECIES } from "../src/model/species.js";
+import Resource from "../src/model/Resource.js";
 
 const at = (a) => `(${a.x.toFixed(0)}, ${a.y.toFixed(0)})`;
 
@@ -90,6 +91,35 @@ farm = farm.add(Duck.random()).farm;
 console.log(`\nAfter two arrivals: ${farm.size} animals, placed clear at ${at(newcomer)}`);
 farm = farm.remove(newcomer.id);
 console.log(`After Marigold leaves: ${farm.size} animals`);
+
+// A pair of the same species, kept fed and watered, will breed.
+console.log("\nBreeding — one boar, one sow, well supplied:");
+let pen = new Farm("Pen", [], [
+  new Resource("water", { x: 25, y: 40 }),
+  new Resource("grass", { x: 65, y: 50 }),
+]);
+const boar = new Pig("Wilbur", "Duroc", 4);
+const sow = new Pig("Peppa", "Duroc", 3);
+boar.sex = "male";
+sow.sex = "female";
+for (const pig of [boar, sow]) pen = pen.add(pig).farm;
+
+let announced = false;
+for (let round = 1; round <= 1200; round++) {
+  const { farm: next, born } = pen.stepAll();
+  pen = next;
+  for (const source of pen.resources) source.refill(source.capacity);
+  if (!announced && sow.isPregnant) {
+    console.log(`  round ${round}: ${sow.name} is carrying, by ${sow.pregnancy.by}` +
+      ` — ${sow.pregnancy.left} steps to go`);
+    announced = true;
+  }
+  for (const baby of born) {
+    console.log(`  round ${round}: ${baby.birthNotice()}`);
+    console.log(`             born a ${baby.species} to a ${baby.parents.species}, aged ${baby.age}`);
+  }
+}
+console.log(`  the pen now holds ${pen.size}: ${pen.animals.map((a) => a.describe().split(" — ")[0]).join(", ")}`);
 
 // Nothing grows back. A farm nobody tends drinks itself dry and dies.
 console.log("\nLeft alone with nothing in the field:");

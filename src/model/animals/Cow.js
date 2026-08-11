@@ -13,8 +13,8 @@ export default class Cow extends Animal {
   static turnRate = 0.22;  // unhurried about changing its mind
 
   // Eats most of the day and thinks about little else.
-  static affinities = { graze: 1.0, drink: 0.7, rest: 0.6, flock: 0.5, wallow: 0, roam: 0.3 };
-  static driveRates = { hunger: 0.007, thirst: 0.005, fatigue: 0.002, loneliness: 0.003 };
+  static affinities = { graze: 1.0, drink: 0.7, rest: 0.6, flock: 0.5, wallow: 0, roam: 0.3, mate: 0.6 };
+  static driveRates = { hunger: 0.007, thirst: 0.005, fatigue: 0.002, loneliness: 0.003, urge: 0.003 };
   static intake = 1.1;  // drinks and grazes more than anything else here
 
   constructor(name, breed, age) {

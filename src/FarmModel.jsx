@@ -7,8 +7,10 @@ import { sourceOf } from "./sources.js";
 
 /** How each goal reads on screen. Presentation only — the model has no icons. */
 const GOAL_ICONS = {
-  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶",
+  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️",
 };
+
+const SEX_MARKS = { female: "♀", male: "♂" };
 
 const RESOURCE_ICONS = { water: "💧", grass: "🌿" };
 
@@ -58,9 +60,10 @@ export default function FarmModel() {
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
-      const { farm: next, died, dried } = farmRef.current.stepAll();
+      const { farm: next, died, dried, born } = farmRef.current.stepAll();
       setFarm(next);
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
+      for (const baby of born) pushLog(baby.birthNotice(), "born");
       for (const animal of died) pushLog(animal.epitaph(), "died");
     }, STEP_MS);
     return () => window.clearInterval(timer);
@@ -86,13 +89,14 @@ export default function FarmModel() {
    * farm decides where — or whether — it can go.
    */
   function walk(animal) {
-    const { farm: next, outcome, died } = farm.step(animal.id);
+    const { farm: next, outcome, died, born } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move");
     } else {
       pushLog(animal.narrate(), animal.goal);
     }
+    for (const baby of born) pushLog(baby.birthNotice(), "born");
     for (const lost of died) pushLog(lost.epitaph(), "died");
   }
 
@@ -362,6 +366,7 @@ export default function FarmModel() {
           letter-spacing: 0.5px;
           line-height: 1.05;
         }
+        .fa-card-name .sex { color: var(--barn-red); }
         .fa-intent {
           display: flex;
           align-items: baseline;
@@ -579,8 +584,13 @@ export default function FarmModel() {
               {speakingId === a.id && (
                 <div className="fa-bubble">{a.makeSound().split('"')[1] ? `"${a.makeSound().split('"')[1]}"` : "…"}</div>
               )}
-              <span className="emoji">{a.emoji}</span>
-              <span className="tag">{a.name}</span>
+              {/* Newborns are visibly smaller until they grow up. */}
+              <span className="emoji" style={a.isAdult ? undefined : { fontSize: "18px" }}>
+                {a.emoji}
+              </span>
+              <span className="tag">
+                {a.name} {SEX_MARKS[a.sex]}{a.isPregnant ? " 🤰" : ""}
+              </span>
             </button>
           ))}
           {farm.size === 0 && <div className="fa-empty">The pasture is empty. Add an animal below.</div>}
@@ -591,11 +601,29 @@ export default function FarmModel() {
           {selected && (
             <div className="fa-card">
               <div className="fa-card-species">class {selected.species} extends Animal</div>
-              <div className="fa-card-name">{selected.emoji} {selected.name}</div>
+              <div className="fa-card-name">
+                {selected.emoji} {selected.name} <span className="sex">{SEX_MARKS[selected.sex]}</span>
+              </div>
               <div className="fa-intent">
                 <span>{GOAL_ICONS[selected.goal] ?? "•"} {selected.goal}</span>
                 <span className="why">{selected.intention.reason}</span>
               </div>
+              {selected.isPregnant && (
+                <div className="fa-intent">
+                  <span>🤰 expecting</span>
+                  <span className="why">
+                    by {selected.pregnancy.by} · {selected.pregnancy.left} steps to go
+                  </span>
+                </div>
+              )}
+              {!selected.isAdult && (
+                <div className="fa-intent">
+                  <span>🍼 young</span>
+                  <span className="why">
+                    grown in {Math.max(0, selected.constructor.maturesAt - selected.stepsAlive)} steps
+                  </span>
+                </div>
+              )}
               <div className="fa-drives">
                 <div className="fa-drive">
                   <span className="n">Condition</span>

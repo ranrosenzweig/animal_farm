@@ -118,6 +118,89 @@ export default class Farm {
     return nearest;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Breeding                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The nearest animal `seeker` could actually breed with: **its own species**,
+   * the opposite sex, grown, not already carrying, and looking for the same
+   * thing. Cross-species pairings are impossible by construction — the species
+   * test is here, and this is the only way two animals are ever matched.
+   * @returns {import("./Animal.js").default | null}
+   */
+  nearestMate(seeker) {
+    if (!seeker.canMate()) return null;
+
+    let nearest = null;
+    let shortest = Infinity;
+    for (const other of this.animals) {
+      if (other === seeker) continue;
+      if (other.species !== seeker.species) continue;
+      if (other.sex === seeker.sex) continue;
+      if (!other.canMate() || other.goal !== "mate") continue;
+      const away = distance(seeker, other);
+      if (away < shortest) {
+        shortest = away;
+        nearest = other;
+      }
+    }
+    return nearest;
+  }
+
+  /**
+   * If `mover` is courting and has reached a willing partner, they mate and
+   * the female takes. Called after the step, so animals pair where they
+   * actually ended up.
+   * @returns {{ mother, father } | null}
+   * @private
+   */
+  courtship(mover) {
+    if (mover.goal !== "mate") return null;
+    const partner = this.nearestMate(mover);
+    if (!partner) return null;
+    if (distance(mover, partner) > mover.radius + partner.radius + 1) return null;
+
+    const mother = mover.sex === "female" ? mover : partner;
+    const father = mover.sex === "female" ? partner : mover;
+    mother.conceive(father);
+    return { mother, father };
+  }
+
+  /**
+   * Any young due are born, each of its mother's own species. A birth needs
+   * somewhere to stand: on a full pasture it simply waits for room.
+   * @returns {import("./Animal.js").default[]}
+   * @private
+   */
+  deliver() {
+    const born = [];
+    for (const mother of this.animals) {
+      if (!mother.isAlive() || !mother.readyToBirth()) continue;
+      const baby = mother.newborn();
+      const spot = this.freeSpotFor(baby);
+      if (!spot) continue; // no room in the field; the birth waits
+      baby.name = this.unusedName(baby.name);
+      baby.moveTo(spot);
+      mother.delivered();
+      born.push(baby);
+    }
+    return born;
+  }
+
+  /**
+   * `name`, or the next free variation of it. Species name lists are short,
+   * so without this a farm ends up with two Babes and an ambiguous log.
+   * @private
+   */
+  unusedName(name) {
+    const taken = new Set(this.animals.map((a) => a.name));
+    if (!taken.has(name)) return name;
+    let n = 2;
+    while (taken.has(`${name} ${n}`)) n += 1;
+    return `${name} ${n}`;
+  }
+
   /** What's left in the field, per kind. */
   stock() {
     return RESOURCE_NAMES.map((kind) => {
@@ -189,10 +272,12 @@ export default class Farm {
         if (!this.isClear(spot, mover)) continue;
         mover.advanceTo(spot, angle);
         mover.settle();
+        this.courtship(mover);
         return "moved";
       }
     }
     mover.balk();
+    this.courtship(mover); // a pair that met and stopped is still a pair
     return "blocked";
   }
 
@@ -206,12 +291,14 @@ export default class Farm {
     const mover = this.find(id);
     if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null, died: [] };
     const outcome = this.stepOne(mover);
+    const born = this.deliver();
     return {
-      farm: this.settled(),
+      farm: this.settled(born),
       moved: outcome === "moved",
       outcome,
       intention: { ...mover.intention },
       died: mover.isAlive() ? [] : [mover],
+      born,
     };
   }
 
@@ -226,23 +313,25 @@ export default class Farm {
     for (const animal of this.animals) {
       if (this.stepOne(animal) === "moved") moved += 1;
     }
+    const born = this.deliver();
     return {
-      farm: this.settled(),
+      farm: this.settled(born),
       moved,
+      born,
       died: this.animals.filter((a) => !a.isAlive()),
       dried: this.resources.filter((r) => r.depleted),
     };
   }
 
   /**
-   * The farm as it stands after a round: the dead are off the field and the
-   * drained sources are gone.
+   * The farm as it stands after a round: the young are on the field, the dead
+   * are off it, and the drained sources are gone.
    * @private
    */
-  settled() {
+  settled(born = []) {
     return new Farm(
       this.name,
-      this.animals.filter((a) => a.isAlive()),
+      [...this.animals.filter((a) => a.isAlive()), ...born],
       this.resources.filter((r) => !r.depleted),
     );
   }

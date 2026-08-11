@@ -55,6 +55,8 @@ const audit = (when) => {
       if (!(level >= 0 && level <= 1)) fail(`${when}: ${a.name}'s ${drive} is ${level}`);
     }
     if (!(a.health > 0)) fail(`${when}: ${a.name} is still on the field at ${a.health} condition`);
+    if (a.isPregnant && a.sex !== "female") fail(`${when}: ${a.name} is ${a.sex} and carrying young`);
+    if (a.isPregnant && !a.isAdult) fail(`${when}: ${a.name} is a newborn and carrying young`);
   }
   for (const r of farm.resources) {
     if (r.volume < 0) fail(`${when}: ${r.name} has been drawn to ${r.volume}`);
@@ -131,6 +133,37 @@ if (bare.size > 0) {
 } else {
   console.log(`Famine: all ${buried} of ${startedWith} animals died within ${famineRounds} rounds ` +
     `on an empty field (of ${[...causes].join(" and ")}).`);
+}
+
+// Breeding: a pair must produce young of their own species, and nothing else.
+// Well supplied and topped up, so this measures breeding and not starvation.
+let herd = new Farm("Breeding", [], [
+  new Resource("water", { x: 15, y: 25 }), new Resource("water", { x: 80, y: 68 }),
+  new Resource("grass", { x: 35, y: 45 }), new Resource("grass", { x: 62, y: 45 }),
+]);
+for (const Species of SPECIES) {
+  for (let i = 0; i < 2; i++) herd = herd.add(Species.random()).farm;
+}
+let calved = 0;
+for (let round = 1; round <= 1500; round++) {
+  const { farm: next, born } = herd.stepAll();
+  herd = next;
+  for (const source of herd.resources) source.refill(source.capacity);
+  for (const baby of born) {
+    calved += 1;
+    if (baby.species !== baby.parents.species) {
+      fail(`breeding: a ${baby.parents.species} gave birth to a ${baby.species}`);
+    }
+    if (baby.age !== 0) fail(`breeding: ${baby.name} was born aged ${baby.age}`);
+  }
+  for (const [a, b] of herd.overlaps()) {
+    fail(`breeding round ${round}: ${a.name} overlaps ${b.name}`);
+  }
+}
+if (calved === 0) {
+  fail("breeding: 1500 rounds with pairs of every species and not one birth");
+} else {
+  console.log(`Breeding: ${calved} born over 1500 rounds, every one its mother's species.`);
 }
 
 if (failures > 0) {

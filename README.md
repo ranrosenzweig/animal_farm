@@ -140,12 +140,12 @@ drives ──▶ Mind.decide(percept) ──▶ goal ──▶ place ──▶ h
  feel          choose                        steer            act    arbitrate
 ```
 
-**Drives** (`hunger`, `thirst`, `fatigue`, `loneliness`) run 0–1, climb every
+**Drives** (`hunger`, `thirst`, `fatigue`, `loneliness`, `urge`) run 0–1, climb every
 step at species-specific rates, and fall only while the animal is doing
 something about them. They are pressure, not decisions.
 
 **Goals** are what a mind chooses between — `graze`, `drink`, `wallow`,
-`flock`, `rest`, `roam`. A goal knows which drive it relieves and where the
+`flock`, `rest`, `roam`, `mate`. A goal knows which drive it relieves and where the
 animal has to be; it does not know how to walk there. `roam` relieves nothing,
 so it only wins when nothing else presses — and it's where each species' own
 way of moving still shows through (`roamHeading()`). `graze` and `drink`
@@ -225,6 +225,39 @@ const { farm, resource } = farm.addResource("water", { x: 50, y: 45 });
 farm.nearestResource(animal, "grass");   // nearest source with anything in it
 farm.stock();   // [{ kind: "water", volume: 200, sources: 2, unit: "L" }, ...]
 ```
+
+## Breeding
+
+Every animal is `male` or `female`, decided at birth, and `mate` is a goal like
+any other — driven by an `urge` that climbs until it's acted on.
+
+**Only the Farm can match a pair**, for the same reason only the Farm arbitrates
+collisions: an animal cannot check facts about another. `nearestMate(seeker)`
+is the single place two animals are ever paired, and it requires all of:
+
+- the **same species** — cross-species pairing is impossible by construction
+- opposite sexes
+- both grown (`age >= 1`), neither already carrying
+- and both currently pursuing `mate`, so it takes two
+
+Reach a willing partner and the female conceives. After `gestation` (300 steps)
+she gives birth to one newborn **of her own species**, carrying her breed and
+a record of both parents. A birth needs somewhere to stand: on a full pasture
+it simply waits for room.
+
+Newborns are age 0 — visibly smaller in the pasture, unable to breed — and
+become adults after `maturesAt` (400 steps).
+
+```js
+const { farm, born, died } = farm.stepAll();
+born[0].birthNotice();   // "Babe, a female pig, is born to Peppa and Wilbur."
+born[0].parents;         // { mother: "Peppa", father: "Wilbur", species: "Pig" }
+animal.canMate();        // grown, alive, not already carrying
+```
+
+`npm run check` runs 1,500 rounds with pairs of every species and fails if any
+mother produces something other than her own species, if anything male or
+newborn is ever carrying, or if not one birth happens at all.
 
 ## Adding a species
 
