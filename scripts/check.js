@@ -10,11 +10,13 @@
 //   * nobody covers more ground in one step than its stride
 //   * every animal wants something a Mind could actually have chosen, every
 //     drive stays a real 0..1 level, and an animal that chose to stay put did
+//   * no resource is ever drawn below empty, and nothing dead stays on the field
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
 import { angleDifference, inBounds } from "../src/model/pasture.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
+import Resource from "../src/model/Resource.js";
 
 // Deliberately more animals than the field can hold, so the check exercises
 // both halves of the placement rule: the ones that fit, and the ones turned away.
@@ -22,7 +24,15 @@ const HERD = 90;
 const ROUNDS = 200;
 const EPSILON = 1e-9;
 
-let farm = new Farm("Stress Test");
+// Well watered and well grassed, and topped back up every round below. This
+// half of the check is about movement under crowding, so nothing here should
+// die of thirst part way through and thin the herd. Famine gets its own test.
+let farm = new Farm("Stress Test", [], [
+  new Resource("water", { x: 15, y: 25 }), new Resource("water", { x: 15, y: 68 }),
+  new Resource("water", { x: 80, y: 25 }), new Resource("water", { x: 80, y: 68 }),
+  new Resource("grass", { x: 35, y: 45 }), new Resource("grass", { x: 62, y: 45 }),
+  new Resource("grass", { x: 48, y: 20 }), new Resource("grass", { x: 48, y: 72 }),
+]);
 let turnedAway = 0;
 for (let i = 0; i < HERD; i++) {
   const { farm: next, added } = farm.add(SPECIES[i % SPECIES.length].random());
@@ -44,6 +54,11 @@ const audit = (when) => {
       const level = a.drives[drive];
       if (!(level >= 0 && level <= 1)) fail(`${when}: ${a.name}'s ${drive} is ${level}`);
     }
+    if (!(a.health > 0)) fail(`${when}: ${a.name} is still on the field at ${a.health} condition`);
+  }
+  for (const r of farm.resources) {
+    if (r.volume < 0) fail(`${when}: ${r.name} has been drawn to ${r.volume}`);
+    if (r.volume > r.capacity) fail(`${when}: ${r.name} holds ${r.volume} of ${r.capacity}`);
   }
 };
 
@@ -59,6 +74,7 @@ for (let round = 1; round <= ROUNDS; round++) {
   const { farm: next, moved } = farm.stepAll();
   farm = next;
   stepsTaken += moved;
+  for (const source of farm.resources) source.refill(source.capacity);
 
   for (const was of before) {
     const { animal } = was;
@@ -94,6 +110,28 @@ const possible = farm.size * ROUNDS;
 console.log(`Walked ${ROUNDS} rounds: ${stepsTaken}/${possible} steps found room ` +
   `(${((stepsTaken / possible) * 100).toFixed(0)}%); the rest were hemmed in.`);
 console.log(`Sharpest step taken was ${widestTurn.toFixed(2)} rad off the animal's facing.`);
+
+// Famine: with nothing in the field at all, every animal must eventually die
+// and leave it. An animal that survives on an empty farm is a broken model.
+let bare = new Farm("Famine");
+for (const Species of SPECIES) bare = bare.add(Species.random()).farm;
+const startedWith = bare.size;
+let buried = 0;
+let famineRounds = 0;
+const causes = new Set();
+while (bare.size > 0 && famineRounds < 5000) {
+  const { farm: next, died } = bare.stepAll();
+  bare = next;
+  buried += died.length;
+  for (const animal of died) causes.add(animal.endedBy);
+  famineRounds += 1;
+}
+if (bare.size > 0) {
+  fail(`famine: ${bare.size} animals still alive after ${famineRounds} rounds with no water or grass`);
+} else {
+  console.log(`Famine: all ${buried} of ${startedWith} animals died within ${famineRounds} rounds ` +
+    `on an empty field (of ${[...causes].join(" and ")}).`);
+}
 
 if (failures > 0) {
   console.error(`\n${failures} violation(s).`);

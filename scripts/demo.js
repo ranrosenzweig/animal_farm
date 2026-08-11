@@ -2,7 +2,7 @@
 //   node scripts/demo.js
 import Farm from "../src/model/Farm.js";
 import Animal from "../src/model/Animal.js";
-import { Cow, Duck } from "../src/model/species.js";
+import { Cow, Duck, SPECIES } from "../src/model/species.js";
 
 const at = (a) => `(${a.x.toFixed(0)}, ${a.y.toFixed(0)})`;
 
@@ -26,6 +26,13 @@ for (const item of farm.dailyProduce()) {
   console.log(`  ${item.label}: ${item.amount}${item.unit ? ` ${item.unit}` : ""}`);
 }
 
+const showStock = (when) =>
+  console.log(`  ${when.padEnd(14)} ` +
+    farm.stock().map((s) => `${s.label} ${s.volume}${s.unit} in ${s.sources}`).join("   "));
+
+console.log("\nWater and grass run out as they are used:");
+showStock("at opening");
+
 // Each animal is an agent: drives rise, a Mind picks a goal, and the body
 // walks toward wherever that goal is. A step is small, so it takes a good
 // many of them to get anywhere.
@@ -42,6 +49,12 @@ for (const a of farm.animals) {
     ` (stride ${a.stepSize}, turns ≤${a.turnRate}/step)`
   );
 }
+
+showStock(`after ${ROUNDS}`);
+
+// The farmer can put more down anywhere inside the fence.
+farm = farm.addResource("water", { x: 50, y: 45 }, { name: "New trough" }).farm;
+showStock("after a refill");
 
 console.log("\nWhat each of them settled on, and why:");
 for (const a of farm.animals) {
@@ -77,6 +90,16 @@ farm = farm.add(Duck.random()).farm;
 console.log(`\nAfter two arrivals: ${farm.size} animals, placed clear at ${at(newcomer)}`);
 farm = farm.remove(newcomer.id);
 console.log(`After Marigold leaves: ${farm.size} animals`);
+
+// Nothing grows back. A farm nobody tends drinks itself dry and dies.
+console.log("\nLeft alone with nothing in the field:");
+let bare = new Farm("Bare");
+for (const Species of SPECIES) bare = bare.add(Species.random()).farm;
+for (let round = 1; bare.size > 0 && round < 2000; round++) {
+  const { farm: next, died } = bare.stepAll();
+  bare = next;
+  for (const animal of died) console.log(`  round ${round}: ${animal.epitaph()}`);
+}
 
 try {
   new Animal("Nobody", "None", 1);

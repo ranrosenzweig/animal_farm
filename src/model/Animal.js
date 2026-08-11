@@ -2,6 +2,7 @@ import { nextId, pick, randomAngle, randomInt } from "./random.js";
 import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js";
 import { DRIVES, clamp01, startingDrives } from "./drives.js";
 import { GOALS, atGoal } from "./goals.js";
+import { RESOURCE_NAMES } from "./Resource.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
 
 /**
@@ -64,6 +65,15 @@ export default class Animal {
   /** @type {number} How fast the relevant drive falls while at a goal. */
   static relief = 0.06;
 
+  /** @type {number} A full mouthful, in resource units per step. Bigger animals take more. */
+  static intake = 0.6;
+
+  /** @type {number} Condition lost per step while starving or parched. */
+  static frailty = 0.004;
+
+  /** @type {number} Condition regained per step when neither is at its limit. */
+  static recovery = 0.002;
+
   /** @type {number} Standing pressure behind goals that relieve nothing (roam). */
   static baselinePressure = 0.35;
 
@@ -94,6 +104,10 @@ export default class Animal {
     this.veer = 0;
 
     this.drives = startingDrives();
+    /** Condition, 0–1. Falls only while a drive is pinned at its limit. At 0 it dies. */
+    this.health = 1;
+    /** Which drive finished it off, once it has. */
+    this.endedBy = null;
     /** What it is currently trying to do, and why. */
     this.intention = { goal: "roam", reason: "newly arrived" };
     /** Whatever decides that. Replaceable per animal. */
@@ -134,14 +148,23 @@ export default class Animal {
    * @param {{ neighbors?: Animal[] }} context
    * @returns {import("./minds/Mind.js").Percept}
    */
-  perceive({ neighbors = [] } = {}) {
+  perceive({ neighbors = [], farm } = {}) {
     return {
       self: {
         name: this.name,
         species: this.species,
         goal: this.goal,
+        health: this.health,
         drives: { ...this.drives },
       },
+      // The nearest source of each kind that still has something in it.
+      // `distance: null` means there is none left anywhere in the field.
+      sources: RESOURCE_NAMES.map((kind) => {
+        const source = farm?.nearestResource(this, kind);
+        return source
+          ? { kind, distance: Math.round(distance(this, source)), volume: Math.round(source.volume) }
+          : { kind, distance: null, volume: 0 };
+      }),
       options: Object.entries(this.affinities)
         .filter(([, affinity]) => affinity > 0)
         .map(([goal, affinity]) => ({
@@ -182,7 +205,7 @@ export default class Animal {
     return this.goal !== previous;
   }
 
-  /** Drives climb; the one being served falls faster than it climbs. */
+  /** Drives climb; the one being served falls only if there was anything to take. */
   feel(context = {}) {
     const rates = this.constructor.driveRates;
     for (const drive of DRIVES) {
@@ -192,7 +215,12 @@ export default class Animal {
     const relief = this.constructor.relief;
     const current = GOALS[this.goal];
     if (current?.relieves && atGoal(this, this.goal, context)) {
-      this.drives[current.relieves] = clamp01(this.drives[current.relieves] - relief);
+      // Standing at a dry pond is not drinking. A goal that consumes pays off
+      // only in proportion to what the source could actually give.
+      const share = current.consumes ? this.consume(current, context) : 1;
+      if (share > 0) {
+        this.drives[current.relieves] = clamp01(this.drives[current.relieves] - relief * share);
+      }
     }
 
     // A few goals pay off whether or not the animal set out to pursue them —
@@ -203,6 +231,45 @@ export default class Animal {
       if (!atGoal(this, name, context)) continue;
       this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - relief / 4);
     }
+
+    this.wear();
+  }
+
+  /**
+   * Take a mouthful from whatever source serves the current goal.
+   * @returns {number} 0–1, how much of a full mouthful it actually got
+   * @private
+   */
+  consume(goal, context) {
+    const source = goal.place(this, context);
+    if (typeof source?.draw !== "function") return 0;
+    const wanted = this.constructor.intake;
+    return wanted > 0 ? source.draw(wanted) / wanted : 0;
+  }
+
+  /**
+   * Going without tells. An animal wears down only while a drive is pinned at
+   * its limit — being merely hungry costs it nothing — and it mends whenever
+   * neither is. Reaching zero is the end of it.
+   * @private
+   */
+  wear() {
+    const parched = this.drives.thirst >= 1;
+    const starving = this.drives.hunger >= 1;
+    const { frailty, recovery } = this.constructor;
+
+    this.health = clamp01(this.health + (parched || starving ? -frailty : recovery));
+    if (this.health <= 0 && !this.endedBy) {
+      this.endedBy = parched ? "thirst" : "hunger";
+    }
+  }
+
+  /** False once its condition has run out. The Farm clears it from the field. */
+  isAlive() { return this.health > 0; }
+
+  /** Why it died, in words. */
+  epitaph() {
+    return `${this.name} the ${this.species.toLowerCase()} died of ${this.endedBy ?? "unknown causes"}.`;
   }
 
   /** True while its goal is one it pursues by standing still. */

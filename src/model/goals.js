@@ -1,4 +1,23 @@
-import { MUD, POND, centroid, distance, nearestFencePoint } from "./pasture.js";
+import { MUD, centroid, distance } from "./pasture.js";
+
+/**
+ * Builds the place/satisfied pair for a goal served by a resource that runs
+ * out. The destination is whichever source of `kind` is nearest and still has
+ * something in it — so a drained pond stops attracting animals, and they walk
+ * to the next one. With none left anywhere the place is null: the animal has
+ * nowhere to go, wanders, and its drive keeps climbing.
+ */
+function fromSource(kind) {
+  return {
+    consumes: kind,
+    place: (animal, { farm } = {}) => farm?.nearestResource(animal, kind) ?? null,
+    // Close enough to reach into it — a big pond can be drunk from its edge.
+    satisfied: (animal, context = {}) => {
+      const source = context.farm?.nearestResource(animal, kind);
+      return source != null && distance(animal, source) < animal.radius + source.radius;
+    },
+  };
+}
 
 /**
  * What an animal can be trying to do.
@@ -17,14 +36,14 @@ import { MUD, POND, centroid, distance, nearestFencePoint } from "./pasture.js";
 export const GOALS = {
   graze: {
     relieves: "hunger",
-    place: (animal) => nearestFencePoint(animal),
-    narrate: (a) => `${a.name} crops the grass along the fence.`,
+    ...fromSource("grass"),
+    narrate: (a) => `${a.name} crops at the grass.`,
   },
 
   drink: {
     relieves: "thirst",
-    place: () => POND,
-    narrate: (a) => `${a.name} drinks at the pond.`,
+    ...fromSource("water"),
+    narrate: (a) => `${a.name} drinks.`,
   },
 
   wallow: {

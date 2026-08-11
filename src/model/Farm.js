@@ -1,6 +1,7 @@
 import { SPECIES } from "./species.js";
-import { PASTURE, distance, inBounds } from "./pasture.js";
+import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomInt } from "./random.js";
+import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
 
 /**
  * The farm itself: a named place that holds animals and can answer
@@ -30,15 +31,25 @@ export default class Farm {
   /**
    * @param {string} name
    * @param {import("./Animal.js").default[]} animals
+   * @param {Resource[]} resources  water and grass, which run out
    */
-  constructor(name = "The Farm", animals = []) {
+  constructor(name = "The Farm", animals = [], resources = []) {
     this.name = name;
     this.animals = animals;
+    this.resources = resources;
   }
 
-  /** A farm stocked with one of every known species, none on top of another. */
+  /** A farm stocked with one of every species, a pond and two patches of grass. */
   static starter(name = "The Farm") {
-    return SPECIES.reduce((farm, Species) => farm.add(Species.random()).farm, new Farm(name));
+    // Enough to start with, not enough to forget about: nothing here grows
+    // back, so a farm left alone drinks itself dry and dies.
+    const land = new Farm(name, [], [
+      new Resource("water", { x: 17, y: 68 }, { name: "Pond" }),
+      new Resource("water", { x: 80, y: 24 }, { name: "Trough" }),
+      new Resource("grass", { x: 34, y: 30 }, { name: "Meadow" }),
+      new Resource("grass", { x: 74, y: 60 }, { name: "Clover patch" }),
+    ]);
+    return SPECIES.reduce((farm, Species) => farm.add(Species.random()).farm, land);
   }
 
   get size() { return this.animals.length; }
@@ -53,12 +64,12 @@ export default class Farm {
     const spot = this.freeSpotFor(animal);
     if (!spot) return { farm: this, added: false };
     animal.moveTo(spot);
-    return { farm: new Farm(this.name, [...this.animals, animal]), added: true };
+    return { farm: new Farm(this.name, [...this.animals, animal], this.resources), added: true };
   }
 
   /** @returns {Farm} a new farm without the animal carrying `id`. */
   remove(id) {
-    return new Farm(this.name, this.animals.filter((a) => a.id !== id));
+    return new Farm(this.name, this.animals.filter((a) => a.id !== id), this.resources);
   }
 
   find(id) {
@@ -67,6 +78,58 @@ export default class Farm {
 
   bySpecies(species) {
     return this.animals.filter((a) => a.species === species);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Water and grass                                                   */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Put down water or grass. Animals aren't blocked by it and can stand in
+   * it — a trough is somewhere to be, not something to walk around.
+   * @param {"water"|"grass"} kind
+   * @param {{x: number, y: number}} at  clamped inside the fence
+   * @returns {{ farm: Farm, resource: Resource }}
+   */
+  addResource(kind, at, options) {
+    const resource = new Resource(kind, clampToPasture(at), options);
+    return {
+      farm: new Farm(this.name, this.animals, [...this.resources, resource]),
+      resource,
+    };
+  }
+
+  /**
+   * The closest source of `kind` that still has something in it. A drained
+   * one stops attracting animals; null means there is none left at all.
+   * @returns {Resource | null}
+   */
+  nearestResource(point, kind) {
+    let nearest = null;
+    let shortest = Infinity;
+    for (const resource of this.resources) {
+      if (resource.kind !== kind || resource.depleted) continue;
+      const away = distance(point, resource);
+      if (away < shortest) {
+        shortest = away;
+        nearest = resource;
+      }
+    }
+    return nearest;
+  }
+
+  /** What's left in the field, per kind. */
+  stock() {
+    return RESOURCE_NAMES.map((kind) => {
+      const of = this.resources.filter((r) => r.kind === kind && !r.depleted);
+      return {
+        kind,
+        label: RESOURCE_KINDS[kind].label,
+        unit: RESOURCE_KINDS[kind].unit,
+        sources: of.length,
+        volume: Math.round(of.reduce((total, r) => total + r.volume, 0)),
+      };
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -141,13 +204,14 @@ export default class Farm {
    */
   step(id) {
     const mover = this.find(id);
-    if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null };
+    if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null, died: [] };
     const outcome = this.stepOne(mover);
     return {
-      farm: new Farm(this.name, this.animals),
+      farm: this.settled(),
       moved: outcome === "moved",
       outcome,
       intention: { ...mover.intention },
+      died: mover.isAlive() ? [] : [mover],
     };
   }
 
@@ -162,7 +226,25 @@ export default class Farm {
     for (const animal of this.animals) {
       if (this.stepOne(animal) === "moved") moved += 1;
     }
-    return { farm: new Farm(this.name, this.animals), moved };
+    return {
+      farm: this.settled(),
+      moved,
+      died: this.animals.filter((a) => !a.isAlive()),
+      dried: this.resources.filter((r) => r.depleted),
+    };
+  }
+
+  /**
+   * The farm as it stands after a round: the dead are off the field and the
+   * drained sources are gone.
+   * @private
+   */
+  settled() {
+    return new Farm(
+      this.name,
+      this.animals.filter((a) => a.isAlive()),
+      this.resources.filter((r) => !r.depleted),
+    );
   }
 
   /**

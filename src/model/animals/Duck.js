@@ -15,6 +15,7 @@ export default class Duck extends Animal {
   // Never far from water, and thirsty long before it is hungry.
   static affinities = { drink: 1.0, graze: 0.6, flock: 0.5, rest: 0.4, wallow: 0, roam: 0.5 };
   static driveRates = { hunger: 0.004, thirst: 0.009, fatigue: 0.003, loneliness: 0.005 };
+  static intake = 0.4;
 
   constructor(name, breed, age) {
     super(name, breed, age);

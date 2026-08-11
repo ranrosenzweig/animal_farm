@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
-import { MUD, POND } from "./model/pasture.js";
+import { MUD } from "./model/pasture.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { sourceOf } from "./sources.js";
 
@@ -9,6 +9,8 @@ import { sourceOf } from "./sources.js";
 const GOAL_ICONS = {
   graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶",
 };
+
+const RESOURCE_ICONS = { water: "💧", grass: "🌿" };
 
 /**
  * How long one step takes. The sprite's CSS transition is driven from this
@@ -18,7 +20,7 @@ const GOAL_ICONS = {
  */
 const STEP_MS = 600;
 
-/** Calm when a drive is low, urgent when it is high. */
+/** Calm when a drive is low, urgent when it is high. Condition passes 1 - health. */
 function driveColor(level) {
   if (level < 0.4) return "#6f9451";
   if (level < 0.75) return "#C9922F";
@@ -38,11 +40,14 @@ export default function FarmModel() {
   const [addSpecies, setAddSpecies] = useState(SPECIES[0].species);
   const [showSource, setShowSource] = useState(false);
   const [roaming, setRoaming] = useState(false);
+  /** Which kind of resource the next pasture click puts down, if any. */
+  const [placing, setPlacing] = useState(null);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const census = farm.census();
   const produce = farm.dailyProduce();
   const activity = farm.activity();
+  const stock = farm.stock();
 
   // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
   // the current farm through a ref rather than a state updater — React invokes
@@ -52,7 +57,12 @@ export default function FarmModel() {
 
   useEffect(() => {
     if (!roaming) return undefined;
-    const timer = window.setInterval(() => setFarm(farmRef.current.stepAll().farm), STEP_MS);
+    const timer = window.setInterval(() => {
+      const { farm: next, died, dried } = farmRef.current.stepAll();
+      setFarm(next);
+      for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
+      for (const animal of died) pushLog(animal.epitaph(), "died");
+    }, STEP_MS);
     return () => window.clearInterval(timer);
   }, [roaming]);
 
@@ -76,13 +86,27 @@ export default function FarmModel() {
    * farm decides where — or whether — it can go.
    */
   function walk(animal) {
-    const { farm: next, outcome } = farm.step(animal.id);
+    const { farm: next, outcome, died } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move");
     } else {
       pushLog(animal.narrate(), animal.goal);
     }
+    for (const lost of died) pushLog(lost.epitaph(), "died");
+  }
+
+  /** Put water or grass wherever the farmer clicked. */
+  function placeAt(event) {
+    if (!placing) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const { farm: next, resource } = farm.addResource(placing, {
+      x: ((event.clientX - box.left) / box.width) * 100,
+      y: ((event.clientY - box.top) / box.height) * 100,
+    });
+    setFarm(next);
+    setPlacing(null);
+    pushLog(`${resource.name} put down — ${Math.round(resource.volume)} ${resource.unit}.`, placing);
   }
 
   function addAnimal() {
@@ -275,17 +299,25 @@ export default function FarmModel() {
           border-radius: 50%;
           pointer-events: none;
         }
-        .fa-pond {
-          width: 21%; height: 15%;
+        .fa-source {
+          /* size and opacity come from how much is left, so a drained source
+             visibly shrinks and fades before it disappears */
+          transition: width 0.4s linear, height 0.4s linear, opacity 0.4s linear;
+        }
+        .fa-water {
           background: radial-gradient(ellipse at 40% 35%, #7fb4d6, #3E7CA6);
           box-shadow: inset 0 -3px 6px rgba(0,0,0,0.2);
-          opacity: 0.85;
+        }
+        .fa-grass {
+          background: radial-gradient(ellipse at 45% 40%, #8cbf5f, #4d7a2e);
         }
         .fa-mud {
           width: 19%; height: 13%;
           background: radial-gradient(ellipse at 45% 40%, #7a5b3f, #4a3421);
           opacity: 0.7;
         }
+        .fa-pasture.placing { cursor: crosshair; }
+        .fa-pasture.placing .fa-sprite { cursor: crosshair; }
         .fa-empty {
           position: absolute;
           inset: 0;
@@ -513,16 +545,35 @@ export default function FarmModel() {
       </div>
 
       <div className="fa-body">
-        <div className="fa-pasture">
+        <div className={"fa-pasture" + (placing ? " placing" : "")} onClick={placeAt}>
           <div className="fa-barn">🏚️</div>
-          <div className="fa-feature fa-pond" style={{ left: `${POND.x}%`, top: `${POND.y}%` }} />
           <div className="fa-feature fa-mud" style={{ left: `${MUD.x}%`, top: `${MUD.y}%` }} />
+          {farm.resources.map((source) => (
+            <div
+              key={source.id}
+              className={`fa-feature fa-source fa-${source.kind}`}
+              title={source.describe()}
+              style={{
+                left: `${source.x}%`,
+                top: `${source.y}%`,
+                width: `${source.radius * 2}%`,
+                height: `${source.radius * 1.45}%`,
+                opacity: 0.45 + source.fullness * 0.45,
+              }}
+            />
+          ))}
           {farm.animals.map((a) => (
             <button
               key={a.id}
               className={"fa-sprite" + (a.id === selected?.id ? " selected" : "")}
               style={{ left: `${a.x}%`, top: `${a.y}%` }}
-              onClick={() => { setSelectedId(a.id); setShowSource(false); }}
+              onClick={(event) => {
+                // While placing, let the click through to the pasture beneath.
+                if (placing) return;
+                event.stopPropagation();
+                setSelectedId(a.id);
+                setShowSource(false);
+              }}
               title={a.describe()}
             >
               {speakingId === a.id && (
@@ -546,6 +597,19 @@ export default function FarmModel() {
                 <span className="why">{selected.intention.reason}</span>
               </div>
               <div className="fa-drives">
+                <div className="fa-drive">
+                  <span className="n">Condition</span>
+                  <span className="bar">
+                    <span
+                      className="fill"
+                      style={{
+                        width: `${selected.health * 100}%`,
+                        background: driveColor(1 - selected.health),
+                      }}
+                    />
+                  </span>
+                  <span className="pct">{Math.round(selected.health * 100)}%</span>
+                </div>
                 {DRIVES.map((drive) => {
                   const level = selected.drives[drive];
                   return (
@@ -580,6 +644,41 @@ export default function FarmModel() {
                 <button className="fa-btn alt" onClick={removeSelected}>Remove</button>
               </div>
               {showSource && <div className="fa-source">{sourceOf(selected.species)}</div>}
+            </div>
+          )}
+
+          <div className="fa-yield">
+            <span className="lbl">In the field</span>
+            {stock.map((s) => (
+              <span
+                className="item"
+                key={s.kind}
+                style={{ color: s.volume === 0 ? "#a13c2c" : undefined }}
+              >
+                {RESOURCE_ICONS[s.kind]} {s.volume} {s.unit}
+                {s.sources > 1 && <span className="none"> ×{s.sources}</span>}
+              </span>
+            ))}
+            <span className="lbl" style={{ marginLeft: "auto" }}>Put down</span>
+            {["water", "grass"].map((kind) => (
+              <button
+                key={kind}
+                className="fa-btn alt"
+                style={placing === kind
+                  ? { background: "var(--wood)", color: "var(--cream)" }
+                  : undefined}
+                onClick={() => setPlacing((p) => (p === kind ? null : kind))}
+              >
+                {RESOURCE_ICONS[kind]} {kind}
+              </button>
+            ))}
+          </div>
+
+          {placing && (
+            <div className="fa-yield">
+              <span className="none">
+                Click anywhere in the pasture to put down {placing}.
+              </span>
             </div>
           )}
 

@@ -11,6 +11,7 @@ src/
     Farm.js         holds animals; add/remove/step/census/activity; owns the ground rules
     drives.js       hunger, thirst, fatigue, loneliness
     goals.js        what an animal can be trying to do, and where that is
+    Resource.js     water and grass: a place with a volume that runs out
     minds/
       Mind.js       the seam: decide(percept) → intention
       ScriptedMind.js   scores options by affinity × pressure, with commitment
@@ -102,17 +103,21 @@ const { farm, moved } = farm.stepAll();      // everyone, in turn; moved = how m
 farm.overlaps();                             // always [] — the invariant
 ```
 
-`npm run check` audits all of it — overlaps, the fence, stride length, and that
-every step lands within a turn's worth of where the animal was already pointed:
+`npm run check` audits all of it — overlaps, the fence, stride length, that
+every step lands within a turn's worth of where the animal was already pointed,
+that no source is ever drawn below empty, and that an empty field really does
+kill everything on it:
 
 ```
-Placed 44 of 90 animals; 46 turned away for lack of room.
-Walked 200 rounds: 2252/8800 steps found room (26%); the rest were hemmed in.
+Placed 47 of 90 animals; 43 turned away for lack of room.
+Walked 200 rounds: 2174/9400 steps found room (23%); the rest were hemmed in.
 Sharpest step taken was 1.20 rad off the animal's facing.
-OK — nobody overlapped, left the field, sidestepped, or outran its stride.
+Famine: all 6 of 6 animals died within 377 rounds on an empty field (of thirst).
+OK — nobody overlapped, left the field, sidestepped, or outran its stride,
+and every animal wanted something real the whole way through.
 ```
 
-That 26% is a deliberately overstocked field. At a normal six head it's ~83%.
+That 23% is a deliberately overstocked field. At a normal six head it's ~83%.
 
 Placement obeys the same rule: `Farm.add()` looks for a free spot and, if the
 pasture is full, **turns the animal away** (`added: false`) rather than stacking
@@ -143,7 +148,8 @@ something about them. They are pressure, not decisions.
 `flock`, `rest`, `roam`. A goal knows which drive it relieves and where the
 animal has to be; it does not know how to walk there. `roam` relieves nothing,
 so it only wins when nothing else presses — and it's where each species' own
-way of moving still shows through (`roamHeading()`).
+way of moving still shows through (`roamHeading()`). `graze` and `drink`
+additionally **consume** — see below.
 
 **Minds** are the seam. A `Mind` gets a **percept** — plain, serializable data
 — and returns an **intention**:
@@ -178,6 +184,46 @@ break off to eat when hunger outweighs the wallow.
 farm.activity();          // [{ goal: "drink", count: 2 }, { goal: "graze", count: 1 }, ...]
 animal.perceive(context); // the percept, as plain data
 animal.mind = new SomeOtherMind();   // per animal, at any time
+```
+
+## Water, grass, and dying
+
+Water and grass are **Resources**: a place in the pasture with a `volume`, a
+`capacity`, and a `draw(amount)` that only ever gives what it has. They used to
+be fixed landmarks; they are held by the Farm now, because they run out and can
+be put down anywhere.
+
+That one change is what makes the drives matter:
+
+- `drink` and `graze` declare `consumes: "water"` / `"grass"`. Their
+  destination is **the nearest source that still has something in it**, so a
+  drained pond stops attracting animals and they walk to the next one.
+- Relief is proportional to what was actually drawn. Standing at a dry pond is
+  not drinking — the animal gets nothing and its thirst keeps climbing.
+- A bigger animal takes a bigger mouthful (`intake`: 1.1 for a cow, 0.3 for a
+  chicken), so a herd of cattle empties a trough far faster than the poultry.
+- With no source left anywhere, the destination is `null`: the animal wanders,
+  looking, and nothing it does helps.
+
+**Death.** Each animal has a `health` that falls only while a drive is *pinned
+at its limit* — being merely hungry costs nothing — and recovers whenever
+neither is. At zero it dies, and `Farm.stepAll()` clears it from the field
+along with any source that has run dry:
+
+```js
+const { farm, moved, died, dried } = farm.stepAll();
+died[0].epitaph();   // "Shirley the sheep died of thirst."
+```
+
+**Nothing grows back.** A farm left alone drinks itself dry and dies — in the
+famine check, all six animals are gone within about 380 steps of an empty
+field. Keeping them alive is the farmer's job: click **💧 water** or **🌿 grass**
+and then click anywhere in the pasture.
+
+```js
+const { farm, resource } = farm.addResource("water", { x: 50, y: 45 });
+farm.nearestResource(animal, "grass");   // nearest source with anything in it
+farm.stock();   // [{ kind: "water", volume: 200, sources: 2, unit: "L" }, ...]
 ```
 
 ## Adding a species
