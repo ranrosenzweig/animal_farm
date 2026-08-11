@@ -1,0 +1,21 @@
+{
+  "name": "animal-farm",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A model of a farm: an Animal base class, one class per species, and a Farm that keeps them.",
+  "scripts": {
+    "dev": "vite",
+    "demo": "node scripts/demo.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1"
+  }
+}

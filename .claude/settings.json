@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(rm farm-model.jsx)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git -c user.name=Ran -c user.email=ranrosenzweig@gmail.com commit -q -m ' *)"
+    ]
+  }
+}

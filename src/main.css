@@ -1,0 +1,10 @@
+html, body {
+  margin: 0;
+  background: #eef2ea;
+}
+
+#root {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
