@@ -8,9 +8,13 @@
 //   * nobody moves sideways or backward — every step lands within a turn's
 //     worth of the direction the animal was already facing
 //   * nobody covers more ground in one step than its stride
+//   * every animal wants something a Mind could actually have chosen, every
+//     drive stays a real 0..1 level, and an animal that chose to stay put did
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
 import { angleDifference, inBounds } from "../src/model/pasture.js";
+import { GOAL_NAMES } from "../src/model/goals.js";
+import { DRIVES } from "../src/model/drives.js";
 
 // Deliberately more animals than the field can hold, so the check exercises
 // both halves of the placement rule: the ones that fit, and the ones turned away.
@@ -35,6 +39,11 @@ const audit = (when) => {
   }
   for (const a of farm.animals) {
     if (!inBounds(a)) fail(`${when}: ${a.name} is outside the fence at (${a.x}, ${a.y})`);
+    if (!GOAL_NAMES.includes(a.goal)) fail(`${when}: ${a.name} wants "${a.goal}", which is not a goal`);
+    for (const drive of DRIVES) {
+      const level = a.drives[drive];
+      if (!(level >= 0 && level <= 1)) fail(`${when}: ${a.name}'s ${drive} is ${level}`);
+    }
   }
 };
 
@@ -56,6 +65,11 @@ for (let round = 1; round <= ROUNDS; round++) {
     const dx = animal.x - was.x;
     const dy = animal.y - was.y;
     const travelled = Math.hypot(dx, dy);
+
+    // An animal pursuing a goal it performs by standing still must not have moved.
+    if (animal.isStill() && travelled > EPSILON) {
+      fail(`round ${round}: ${animal.name} is ${animal.goal}ing but moved ${travelled.toFixed(2)}`);
+    }
     if (travelled < EPSILON) continue; // stayed put
 
     // It may turn up to turnRate before stepping, and shade the line by at
@@ -85,4 +99,7 @@ if (failures > 0) {
   console.error(`\n${failures} violation(s).`);
   process.exit(1);
 }
-console.log("\nOK — nobody overlapped, left the field, sidestepped, or outran its stride.");
+console.log(
+  "\nOK — nobody overlapped, left the field, sidestepped, or outran its stride,\n" +
+  "and every animal wanted something real the whole way through."
+);

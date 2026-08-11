@@ -1,6 +1,5 @@
 import Animal from "../Animal.js";
 import { randomInt } from "../random.js";
-import { nearestFencePoint } from "../pasture.js";
 
 export default class Cow extends Animal {
   static species = "Cow";
@@ -13,6 +12,10 @@ export default class Cow extends Animal {
   static radius = 5.5;     // takes up room
   static turnRate = 0.22;  // unhurried about changing its mind
 
+  // Eats most of the day and thinks about little else.
+  static affinities = { graze: 1.0, drink: 0.7, rest: 0.6, flock: 0.5, wallow: 0, roam: 0.3 };
+  static driveRates = { hunger: 0.007, thirst: 0.005, fatigue: 0.002, loneliness: 0.003 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.milkPerDay = randomInt(15, 30);
@@ -20,9 +23,6 @@ export default class Cow extends Animal {
 
   makeSound() { return `${this.name} lets out a deep "Moooo!"`; }
   move() { return `${this.name} plods slowly toward the fence.`; }
-
-  /** Makes for whichever stretch of fence is closest, then grazes along it. */
-  heading() { return this.headingToward(nearestFencePoint(this)); }
 
   dailyProduce() { return { label: "Milk", amount: this.milkPerDay, unit: "L" }; }
 

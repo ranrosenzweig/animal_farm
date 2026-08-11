@@ -13,6 +13,10 @@ export default class Horse extends Animal {
   static radius = 5.5;
   static turnRate = 0.3;  // committed to its line; comes about in a wide arc
 
+  // Would rather be running than doing anything else.
+  static affinities = { roam: 1.0, graze: 0.7, drink: 0.6, rest: 0.4, flock: 0.3, wallow: 0 };
+  static driveRates = { hunger: 0.005, thirst: 0.006, fatigue: 0.006, loneliness: 0.004 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.topSpeedKmh = randomInt(40, 70);
@@ -23,11 +27,11 @@ export default class Horse extends Animal {
   move() { return `${this.name} gallops the length of the fence line.`; }
 
   /**
-   * Runs the length of the field. It cannot spin on the spot, so it begins
-   * to come about a full turning circle before the end — otherwise it would
-   * arrive at the fence still pointed straight at it.
+   * With nowhere it needs to be, it runs the length of the field. It cannot
+   * spin on the spot, so it begins to come about a full turning circle before
+   * the end — otherwise it would arrive at the fence still pointed at it.
    */
-  heading() {
+  roamHeading() {
     if (this.x >= PASTURE.maxX - this.turningCircle) this.direction = -1;
     else if (this.x <= PASTURE.minX + this.turningCircle) this.direction = 1;
     return this.direction === 1 ? 0 : Math.PI;

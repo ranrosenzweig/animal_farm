@@ -1,6 +1,5 @@
 import Animal from "../Animal.js";
 import { randomInt } from "../random.js";
-import { POND } from "../pasture.js";
 
 export default class Duck extends Animal {
   static species = "Duck";
@@ -13,6 +12,10 @@ export default class Duck extends Animal {
   static radius = 4.5;
   static turnRate = 0.45;  // waddles round quickly enough
 
+  // Never far from water, and thirsty long before it is hungry.
+  static affinities = { drink: 1.0, graze: 0.6, flock: 0.5, rest: 0.4, wallow: 0, roam: 0.5 };
+  static driveRates = { hunger: 0.004, thirst: 0.009, fatigue: 0.003, loneliness: 0.005 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.pondLapsPerDay = randomInt(5, 15);
@@ -20,9 +23,6 @@ export default class Duck extends Animal {
 
   makeSound() { return `${this.name} lets out a bright "Quack!"`; }
   move() { return `${this.name} waddles off toward the pond.`; }
-
-  /** Heads for the pond, then paddles around near it. */
-  heading() { return this.headingToward(POND); }
 
   getAttributes() {
     return [...super.getAttributes(), { label: "Pond laps / day", value: this.pondLapsPerDay }];

@@ -7,9 +7,14 @@ subclass that defines itself completely — its metadata and its behavior — an
 ```
 src/
   model/            plain JS, no framework, runs under Node
-    Animal.js       abstract base: identity, defaults, heading(), getAttributes()
-    Farm.js         holds animals; add/remove/step/census/dailyProduce; owns the ground rules
-    pasture.js      bounds, landmarks (pond, mud), distance helpers
+    Animal.js       abstract base: body, drives, and the perceive → decide → act loop
+    Farm.js         holds animals; add/remove/step/census/activity; owns the ground rules
+    drives.js       hunger, thirst, fatigue, loneliness
+    goals.js        what an animal can be trying to do, and where that is
+    minds/
+      Mind.js       the seam: decide(percept) → intention
+      ScriptedMind.js   scores options by affinity × pressure, with commitment
+    pasture.js      bounds, landmarks (pond, mud), distance/angle helpers
     species.js      the registry of known species
     random.js       id + random helpers
     animals/        one file per species
@@ -120,11 +125,74 @@ so crossing it takes it the better part of fifty steps. A galloping horse covers
 and runs the sprite's CSS transition for exactly that long, linearly, so a
 walking animal never visibly stops between steps.
 
+## Agents: drives, goals, minds
+
+Each animal is an agent in three layers, and each one only talks to its
+neighbour:
+
+```
+drives ──▶ Mind.decide(percept) ──▶ goal ──▶ place ──▶ heading ──▶ Farm.isClear
+ feel          choose                        steer            act    arbitrate
+```
+
+**Drives** (`hunger`, `thirst`, `fatigue`, `loneliness`) run 0–1, climb every
+step at species-specific rates, and fall only while the animal is doing
+something about them. They are pressure, not decisions.
+
+**Goals** are what a mind chooses between — `graze`, `drink`, `wallow`,
+`flock`, `rest`, `roam`. A goal knows which drive it relieves and where the
+animal has to be; it does not know how to walk there. `roam` relieves nothing,
+so it only wins when nothing else presses — and it's where each species' own
+way of moving still shows through (`roamHeading()`).
+
+**Minds** are the seam. A `Mind` gets a **percept** — plain, serializable data
+— and returns an **intention**:
+
+```js
+{
+  self:    { name: "Daisy", species: "Cow", goal: "graze", drives: {...} },
+  options: [{ goal: "graze", affinity: 1.0, pressure: 0.62 }, ...],
+  nearby:  [{ name: "Wilbur", species: "Pig", distance: 14 }, ...],
+}
+// ──▶ { goal: "drink", reason: "71% pressure" }
+```
+
+Nothing live is in that percept, which is the point: `ScriptedMind` scores it
+arithmetically (`affinity × pressure`, with a **commitment** margin so animals
+don't dither between two close options), but the same object could be dropped
+into a prompt. A mind also declares a `cadence` — bodies tick every step,
+minds needn't — so a slower, more expensive mind slots in without touching
+anything else.
+
+Species express character as **affinities**, not as fixed behavior:
+
+```js
+static affinities = { wallow: 1.0, graze: 0.8, drink: 0.6, rest: 0.2, flock: 0.3, roam: 0.4 };
+static driveRates = { hunger: 0.006, thirst: 0.005, fatigue: 0.005, loneliness: 0.003 };
+```
+
+The pig still makes for the mud — but now because it *wants* to, and it will
+break off to eat when hunger outweighs the wallow.
+
+```js
+farm.activity();          // [{ goal: "drink", count: 2 }, { goal: "graze", count: 1 }, ...]
+animal.perceive(context); // the percept, as plain data
+animal.mind = new SomeOtherMind();   // per animal, at any time
+```
+
 ## Adding a species
 
-Write one class in `src/model/animals/`, add it to `SPECIES` in
-`src/model/species.js`, and add its `?raw` import in `src/sources.js` if you want
-it in the source viewer. The UI picks it up with no further changes.
+Write one class in `src/model/animals/` — static metadata, `affinities`,
+`driveRates`, overridden behavior, and a `roamHeading()` if it should move
+distinctively — add it to `SPECIES` in `src/model/species.js`, and add its
+`?raw` import in `src/sources.js` if you want it in the source viewer. The UI
+picks it up with no further changes.
+
+## Adding a mind
+
+Subclass `Mind`, implement `decide(percept)`, set a `cadence`, and assign it:
+`animal.mind = new YourMind()`. Nothing about the body, the goals, or the
+collision rules changes.
 
 ## Running it
 
@@ -132,6 +200,6 @@ it in the source viewer. The UI picks it up with no further changes.
 npm install
 npm run dev     # the pasture UI at the printed localhost URL
 npm run demo    # exercise the model in the terminal, no browser
-npm run check   # overstock the pasture and audit the no-overlap rule
+npm run check   # overstock the pasture and audit every rule of movement and agency
 npm run build
 ```

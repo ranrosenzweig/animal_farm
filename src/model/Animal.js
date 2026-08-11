@@ -1,25 +1,26 @@
 import { nextId, pick, randomAngle, randomInt } from "./random.js";
 import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js";
+import { DRIVES, clamp01, startingDrives } from "./drives.js";
+import { GOALS, atGoal } from "./goals.js";
+import ScriptedMind from "./minds/ScriptedMind.js";
 
 /**
  * Abstract base for every animal on the farm.
  *
- * A species is defined by three things:
- *   1. Static metadata — `species`, `emoji`, `color`, `diet`, `breeds`,
- *      `names`, plus its `stepSize` and `radius` in the pasture. This is
- *      what the *kind* is.
- *   2. Overridden behavior — `makeSound()`, `move()`, `dailyProduce()`.
- *      This is what an individual *does*.
- *   3. A `heading()` — the direction it wants to walk next, which is where
- *      "the pig makes for the mud, the sheep for the flock" actually lives.
+ * An animal is an agent with three layers, and each one only talks to its
+ * neighbour:
  *
- * An animal has a `facing` and walks *forward* along it. It cannot step
- * sideways or backward: `heading()` says where it would like to be pointed,
- * but `turnToward()` only swings the facing by `turnRate` per step, so a
- * change of direction is an arc, not a jump.
+ *   1. **Body** — where it stands, which way it faces, how fast it walks and
+ *      how sharply it can turn. Static metadata plus `facing`/`x`/`y`.
+ *   2. **Drives** — hunger, thirst, fatigue, loneliness. They rise on their
+ *      own and fall only while the animal is doing something about them.
+ *   3. **Mind** — reads a percept, returns an intention. Swappable: a
+ *      `ScriptedMind` scores the options arithmetically, and anything else
+ *      implementing `decide(percept)` can take its place.
  *
- * An animal chooses a direction but never places itself: only the Farm can
- * see the other animals, so the Farm decides whether a step is allowed.
+ * The mind chooses a *goal*; the goal names a *place*; the body walks toward
+ * it, forward only, and the Farm decides whether that step is allowed. No
+ * layer reaches past the next one down.
  */
 export default class Animal {
   /** @type {string} Display name of the kind. Subclasses must override. */
@@ -49,6 +50,24 @@ export default class Animal {
   static turnRate = 0.35;
 
   /**
+   * @type {Record<string, number>} How much this kind cares about each goal,
+   * 0–1. Multiplied by the pressure behind a goal to score it, so this is
+   * what makes a duck make for the pond and a pig for the mud.
+   */
+  static affinities = {
+    graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4,
+  };
+
+  /** @type {Record<string, number>} How fast each drive climbs, per step. */
+  static driveRates = { hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005 };
+
+  /** @type {number} How fast the relevant drive falls while at a goal. */
+  static relief = 0.06;
+
+  /** @type {number} Standing pressure behind goals that relieve nothing (roam). */
+  static baselinePressure = 0.35;
+
+  /**
    * @param {string} name
    * @param {string} breed
    * @param {number} age  in years
@@ -63,6 +82,7 @@ export default class Animal {
     this.breed = breed;
     this.age = age;
     this.favoriteFood = favoriteFood ?? pick(new.target.diet);
+
     // A provisional spot; Farm.add() relocates it if something is already there.
     this.x = randomInt(PASTURE.minX, PASTURE.maxX);
     this.y = randomInt(PASTURE.minY, PASTURE.maxY);
@@ -72,6 +92,13 @@ export default class Animal {
     this.spin = pick([1, -1]);
     /** How far it has swung away from where it wants to go, to get around something. */
     this.veer = 0;
+
+    this.drives = startingDrives();
+    /** What it is currently trying to do, and why. */
+    this.intention = { goal: "roam", reason: "newly arrived" };
+    /** Whatever decides that. Replaceable per animal. */
+    this.mind = new ScriptedMind();
+    this.sinceDecision = Infinity; // deliberate on the very first step
   }
 
   /** Read the kind off the constructor so subclasses never have to reassign it. */
@@ -81,6 +108,7 @@ export default class Animal {
   get radius() { return this.constructor.radius; }
   get stepSize() { return this.constructor.stepSize; }
   get turnRate() { return this.constructor.turnRate; }
+  get affinities() { return this.constructor.affinities; }
 
   /**
    * Roughly how much room it needs to come about, in pasture units: a long
@@ -88,22 +116,135 @@ export default class Animal {
    */
   get turningCircle() { return this.stepSize / this.turnRate; }
 
+  /** The goal it is currently pursuing. */
+  get goal() { return this.intention.goal; }
+
   makeSound() { return `${this.name} stays quiet.`; }
   move() { return `${this.name} wanders in place.`; }
   eat() { return `${this.name} nibbles on some ${this.favoriteFood}.`; }
 
+  /* ---------------------------------------------------------------- */
+  /* Agency: perceive → decide → pursue                                */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Everything the animal can currently sense, as plain data — no live
+   * objects, nothing that couldn't be written to JSON and handed to a
+   * process that has never heard of this farm.
+   * @param {{ neighbors?: Animal[] }} context
+   * @returns {import("./minds/Mind.js").Percept}
+   */
+  perceive({ neighbors = [] } = {}) {
+    return {
+      self: {
+        name: this.name,
+        species: this.species,
+        goal: this.goal,
+        drives: { ...this.drives },
+      },
+      options: Object.entries(this.affinities)
+        .filter(([, affinity]) => affinity > 0)
+        .map(([goal, affinity]) => ({
+          goal,
+          affinity,
+          pressure: this.pressureFor(goal),
+        })),
+      nearby: neighbors
+        .map((n) => ({
+          name: n.name,
+          species: n.species,
+          distance: Math.round(distance(this, n)),
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 5),
+    };
+  }
+
+  /** How badly it wants a given goal right now, before species affinity. */
+  pressureFor(goalName) {
+    const relieves = GOALS[goalName]?.relieves;
+    return relieves ? this.drives[relieves] : this.constructor.baselinePressure;
+  }
+
+  /**
+   * One step of being alive: drives shift, and — on the mind's own slower
+   * cadence — the animal reconsiders what it is doing.
+   * @returns {boolean} whether it settled on something new this step
+   */
+  think(context = {}) {
+    this.feel(context);
+    this.sinceDecision += 1;
+    if (this.sinceDecision < this.mind.cadence) return false;
+
+    this.sinceDecision = 0;
+    const previous = this.goal;
+    this.intention = this.mind.decide(this.perceive(context));
+    return this.goal !== previous;
+  }
+
+  /** Drives climb; the one being served falls faster than it climbs. */
+  feel(context = {}) {
+    const rates = this.constructor.driveRates;
+    for (const drive of DRIVES) {
+      this.drives[drive] = clamp01(this.drives[drive] + (rates[drive] ?? 0));
+    }
+
+    const relief = this.constructor.relief;
+    const current = GOALS[this.goal];
+    if (current?.relieves && atGoal(this, this.goal, context)) {
+      this.drives[current.relieves] = clamp01(this.drives[current.relieves] - relief);
+    }
+
+    // A few goals pay off whether or not the animal set out to pursue them —
+    // standing among the others is company even if it never chose to flock.
+    // Quarter relief: incidental, not sought.
+    for (const [name, goal] of Object.entries(GOALS)) {
+      if (!goal.passive || name === this.goal || !goal.relieves) continue;
+      if (!atGoal(this, name, context)) continue;
+      this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - relief / 4);
+    }
+  }
+
+  /** True while its goal is one it pursues by standing still. */
+  isStill() { return GOALS[this.goal]?.still === true; }
+
+  /** Where its current goal is asking it to be, or null for nowhere in particular. */
+  goalPlace(context = {}) {
+    return GOALS[this.goal]?.place(this, context) ?? null;
+  }
+
+  /** What it's doing, in words — the goal's line, or the species' own for roaming. */
+  narrate() {
+    return (GOALS[this.goal] ?? GOALS.roam).narrate(this);
+  }
+
   /**
    * The direction, in radians, this animal would like to be pointed next.
-   * This is a wish, not a move — `turnToward` decides how much of it the
-   * animal can act on this step. The base animal just carries on the way it
-   * is already going, with a little drift.
-   * @param {{ neighbors: Animal[] }} _context  the other animals on the farm
+   * A wish, not a move — `turnToward` decides how much of it the animal can
+   * act on. It steers toward whatever its goal named; with no destination it
+   * falls through to the species' own way of wandering.
+   * @param {{ neighbors: Animal[] }} [context]
    * @returns {number}
    */
-  heading(_context) { return this.amble(); }
+  heading(context = {}) {
+    if (this.isStill()) return this.facing;
+    const place = this.goalPlace(context);
+    return place ? this.headingToward(place) : this.roamHeading(context);
+  }
+
+  /**
+   * How this kind moves when it has nowhere in particular to be. Overriding
+   * this is how a species keeps its character without owning its motives.
+   * @protected
+   */
+  roamHeading() { return this.amble(); }
 
   /** Carry on roughly forward. @protected */
   amble() { return this.facing + (Math.random() - 0.5) * 0.6; }
+
+  /* ---------------------------------------------------------------- */
+  /* Body: turning and stepping                                        */
+  /* ---------------------------------------------------------------- */
 
   /**
    * Aim at a fixed point — but once we've arrived, mill about instead of
@@ -162,6 +303,10 @@ export default class Animal {
     this.facing = normalizeAngle(angle);
     return this.moveTo(spot);
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Display                                                           */
+  /* ---------------------------------------------------------------- */
 
   /**
    * What this animal yields in a day, or null if it yields nothing.

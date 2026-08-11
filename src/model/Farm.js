@@ -98,20 +98,26 @@ export default class Farm {
   }
 
   /**
-   * Walk one animal one step, in place.
+   * Live one animal for one step: it feels, it may reconsider, and then it
+   * acts on whatever it decided.
    *
-   * It turns as far toward where it wants to go as its neck allows, then
-   * walks *forward* along the facing it ends up with. If the ground ahead is
-   * taken it may shade the line very slightly or shorten the stride, but it
-   * cannot step around the obstacle — so a blocked animal stays where it is,
-   * having turned a little, and tries a fresh line next step.
+   * Acting means turning as far toward its goal as its neck allows and then
+   * walking *forward* along the facing it ends up with. If the ground ahead
+   * is taken it may shade the line very slightly or shorten the stride, but
+   * it cannot step around the obstacle — so a blocked animal stays where it
+   * is, having turned a little, and tries a fresh line next step.
    *
-   * @returns {boolean} whether it found anywhere to go
+   * @returns {"moved" | "resting" | "blocked"}
    * @private
    */
   stepOne(mover) {
-    const neighbors = this.animals.filter((a) => a !== mover);
-    const facing = mover.turnToward(mover.heading({ neighbors, farm: this }));
+    const context = { neighbors: this.animals.filter((a) => a !== mover), farm: this };
+    mover.think(context);
+
+    // Some goals are pursued by staying put; that isn't being stuck.
+    if (mover.isStill()) return "resting";
+
+    const facing = mover.turnToward(mover.heading(context));
 
     for (const stride of Farm.STRIDES) {
       for (const nudge of Farm.NUDGES) {
@@ -120,33 +126,58 @@ export default class Farm {
         if (!this.isClear(spot, mover)) continue;
         mover.advanceTo(spot, angle);
         mover.settle();
-        return true;
+        return "moved";
       }
     }
     mover.balk();
-    return false;
+    return "blocked";
   }
 
   /**
-   * Move one animal.
-   * @returns {{ farm: Farm, moved: boolean }} `moved` is false when the
-   *   animal is hemmed in on every side and could not step anywhere.
+   * Live one animal for one step.
+   * @returns {{ farm: Farm, moved: boolean, outcome: string, intention: object|null }}
+   *   `outcome` separates the two reasons an animal doesn't move: it chose to
+   *   stay ("resting") or it had nowhere to go ("blocked").
    */
   step(id) {
     const mover = this.find(id);
-    if (!mover) return { farm: this, moved: false };
-    const moved = this.stepOne(mover);
-    return { farm: moved ? new Farm(this.name, this.animals) : this, moved };
+    if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null };
+    const outcome = this.stepOne(mover);
+    return {
+      farm: new Farm(this.name, this.animals),
+      moved: outcome === "moved",
+      outcome,
+      intention: { ...mover.intention },
+    };
   }
 
   /**
-   * Move every animal once, in turn — each one sees where the others have
-   * already gone this round.
+   * Live every animal for one step, in turn — each one sees where the others
+   * have already gone this round. Always returns a new Farm: even an animal
+   * that didn't move has felt something change.
    * @returns {{ farm: Farm, moved: number }} how many actually found room
    */
   stepAll() {
-    const moved = this.animals.reduce((n, a) => n + (this.stepOne(a) ? 1 : 0), 0);
-    return { farm: moved > 0 ? new Farm(this.name, this.animals) : this, moved };
+    let moved = 0;
+    for (const animal of this.animals) {
+      if (this.stepOne(animal) === "moved") moved += 1;
+    }
+    return { farm: new Farm(this.name, this.animals), moved };
+  }
+
+  /**
+   * What the farm is up to: how many animals are pursuing each goal, busiest
+   * first. Empty goals are left out.
+   * @returns {{ goal: string, count: number }[]}
+   */
+  activity() {
+    const tally = new Map();
+    for (const animal of this.animals) {
+      tally.set(animal.goal, (tally.get(animal.goal) ?? 0) + 1);
+    }
+    return [...tally.entries()]
+      .map(([goal, count]) => ({ goal, count }))
+      .sort((a, b) => b.count - a.count);
   }
 
   /** Any pair standing closer than their radii allow. Should always be empty. */

@@ -2,7 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
 import { MUD, POND } from "./model/pasture.js";
+import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { sourceOf } from "./sources.js";
+
+/** How each goal reads on screen. Presentation only — the model has no icons. */
+const GOAL_ICONS = {
+  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶",
+};
 
 /**
  * How long one step takes. The sprite's CSS transition is driven from this
@@ -11,6 +17,13 @@ import { sourceOf } from "./sources.js";
  * followed by a wait.
  */
 const STEP_MS = 600;
+
+/** Calm when a drive is low, urgent when it is high. */
+function driveColor(level) {
+  if (level < 0.4) return "#6f9451";
+  if (level < 0.75) return "#C9922F";
+  return "#a13c2c";
+}
 
 /**
  * A live view of the farm model. Every piece of information on screen is
@@ -29,6 +42,7 @@ export default function FarmModel() {
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const census = farm.census();
   const produce = farm.dailyProduce();
+  const activity = farm.activity();
 
   // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
   // the current farm through a ref rather than a state updater — React invokes
@@ -57,11 +71,18 @@ export default function FarmModel() {
     }
   }
 
-  /** The farm decides where — or whether — the animal can go. */
+  /**
+   * One step of being alive: the animal feels, may reconsider, and acts. The
+   * farm decides where — or whether — it can go.
+   */
   function walk(animal) {
-    const { farm: next, moved } = farm.step(animal.id);
+    const { farm: next, outcome } = farm.step(animal.id);
     setFarm(next);
-    pushLog(moved ? animal.move() : `${animal.name} is hemmed in and stays put.`, "move");
+    if (outcome === "blocked") {
+      pushLog(`${animal.name} is hemmed in and stays put.`, "move");
+    } else {
+      pushLog(animal.narrate(), animal.goal);
+    }
   }
 
   function addAnimal() {
@@ -309,6 +330,44 @@ export default function FarmModel() {
           letter-spacing: 0.5px;
           line-height: 1.05;
         }
+        .fa-intent {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+          margin-top: 6px;
+          font-size: 12.5px;
+          font-weight: 600;
+        }
+        .fa-intent .why {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          font-weight: 400;
+          color: #8a7d5a;
+        }
+        .fa-drives { margin-top: 10px; display: grid; gap: 4px; }
+        .fa-drive {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 11px;
+          color: #6b5f42;
+        }
+        .fa-drive .n { width: 66px; flex-shrink: 0; }
+        .fa-drive .bar {
+          flex: 1;
+          height: 5px;
+          background: #e3d6b3;
+          border-radius: 3px;
+          overflow: hidden;
+        }
+        .fa-drive .fill { height: 100%; transition: width var(--step-duration, 600ms) linear; }
+        .fa-drive .pct {
+          width: 30px;
+          text-align: right;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 9.5px;
+        }
+
         .fa-attrs { margin-top: 10px; }
         .fa-attr-row {
           display: flex;
@@ -482,6 +541,27 @@ export default function FarmModel() {
             <div className="fa-card">
               <div className="fa-card-species">class {selected.species} extends Animal</div>
               <div className="fa-card-name">{selected.emoji} {selected.name}</div>
+              <div className="fa-intent">
+                <span>{GOAL_ICONS[selected.goal] ?? "•"} {selected.goal}</span>
+                <span className="why">{selected.intention.reason}</span>
+              </div>
+              <div className="fa-drives">
+                {DRIVES.map((drive) => {
+                  const level = selected.drives[drive];
+                  return (
+                    <div className="fa-drive" key={drive}>
+                      <span className="n">{DRIVE_LABELS[drive]}</span>
+                      <span className="bar">
+                        <span
+                          className="fill"
+                          style={{ width: `${level * 100}%`, background: driveColor(level) }}
+                        />
+                      </span>
+                      <span className="pct">{Math.round(level * 100)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="fa-attrs">
                 {selected.getAttributes().map((attr) => (
                   <div className="fa-attr-row" key={attr.label}>
@@ -502,6 +582,17 @@ export default function FarmModel() {
               {showSource && <div className="fa-source">{sourceOf(selected.species)}</div>}
             </div>
           )}
+
+          <div className="fa-yield">
+            <span className="lbl">Doing now</span>
+            {activity.length === 0
+              ? <span className="none">nobody about</span>
+              : activity.map((a) => (
+                  <span className="item" key={a.goal}>
+                    {GOAL_ICONS[a.goal] ?? "•"} {a.count} {a.goal}
+                  </span>
+                ))}
+          </div>
 
           <div className="fa-yield">
             <span className="lbl">Daily yield</span>

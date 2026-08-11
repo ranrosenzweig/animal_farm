@@ -1,6 +1,5 @@
 import Animal from "../Animal.js";
 import { randomInt } from "../random.js";
-import { centroid } from "../pasture.js";
 
 export default class Sheep extends Animal {
   static species = "Sheep";
@@ -13,6 +12,10 @@ export default class Sheep extends Animal {
   static radius = 5;
   static turnRate = 0.3;
 
+  // Feels being alone faster than it feels anything else.
+  static affinities = { flock: 1.0, graze: 0.9, drink: 0.6, rest: 0.5, wallow: 0, roam: 0.3 };
+  static driveRates = { hunger: 0.005, thirst: 0.005, fatigue: 0.003, loneliness: 0.010 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.woolPerYear = randomInt(3, 6);
@@ -20,15 +23,6 @@ export default class Sheep extends Animal {
 
   makeSound() { return `${this.name} calls out a soft "Baaaa."`; }
   move() { return `${this.name} shuffles closer to the rest of the flock.`; }
-
-  /**
-   * Flocks: aims at the middle of the other sheep, so a scattered flock
-   * pulls together until personal space stops them. A lone sheep drifts.
-   */
-  heading({ neighbors = [] } = {}) {
-    const flock = centroid(neighbors.filter((a) => a.species === this.species));
-    return flock ? this.headingToward(flock) : this.amble();
-  }
 
   getAttributes() {
     return [...super.getAttributes(), { label: "Wool / year", value: `${this.woolPerYear} kg` }];

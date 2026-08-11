@@ -1,6 +1,5 @@
 import Animal from "../Animal.js";
 import { randomInt } from "../random.js";
-import { MUD } from "../pasture.js";
 
 export default class Pig extends Animal {
   static species = "Pig";
@@ -13,6 +12,10 @@ export default class Pig extends Animal {
   static radius = 5;
   static turnRate = 0.35;
 
+  // The only animal here that would rather wallow than rest.
+  static affinities = { wallow: 1.0, graze: 0.8, drink: 0.6, rest: 0.2, flock: 0.3, roam: 0.4 };
+  static driveRates = { hunger: 0.006, thirst: 0.005, fatigue: 0.005, loneliness: 0.003 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.mudBathsPerDay = randomInt(1, 3);
@@ -20,9 +23,6 @@ export default class Pig extends Animal {
 
   makeSound() { return `${this.name} grunts an enthusiastic "Oink oink!"`; }
   move() { return `${this.name} trots straight for the mud patch.`; }
-
-  /** Straight for the mud, and wallows about once it gets there. */
-  heading() { return this.headingToward(MUD); }
 
   getAttributes() {
     return [...super.getAttributes(), { label: "Mud baths / day", value: this.mudBathsPerDay }];

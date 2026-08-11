@@ -12,6 +12,10 @@ export default class Chicken extends Animal {
   static radius = 4.5;
   static turnRate = 0.6;  // nimble — turns almost on the spot
 
+  // Pecks constantly and keeps its own company.
+  static affinities = { graze: 1.0, roam: 0.7, drink: 0.5, rest: 0.4, flock: 0.2, wallow: 0 };
+  static driveRates = { hunger: 0.009, thirst: 0.005, fatigue: 0.002, loneliness: 0.002 };
+
   constructor(name, breed, age) {
     super(name, breed, age);
     this.eggsPerWeek = randomInt(4, 7);
@@ -21,10 +25,11 @@ export default class Chicken extends Animal {
   move() { return `${this.name} scurries in a tight little circle.`; }
 
   /**
-   * Always wants to be pointed further round than it is, so its turn rate
-   * caps out every step and short hops trace a tight circle (~2.5 units).
+   * Left to itself it always wants to be pointed further round than it is,
+   * so its turn rate caps out every step and short hops trace a tight
+   * circle (~2.5 units).
    */
-  heading() { return this.facing + 1; }
+  roamHeading() { return this.facing + 1; }
 
   dailyProduce() {
     return { label: "Eggs", amount: Math.round((this.eggsPerWeek / 7) * 10) / 10, unit: "" };
