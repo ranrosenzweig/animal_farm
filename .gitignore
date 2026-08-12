@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.local
 .DS_Store
+
+# Local environment. .env.example is the committed template.
+.env
+.env.*
+!.env.example
