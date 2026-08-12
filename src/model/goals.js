@@ -71,12 +71,12 @@ export const GOALS = {
 
   mate: {
     relieves: "urge",
-    // The nearest animal of its own species, opposite sex, grown, not already
-    // carrying, and looking for the same thing. Only the Farm can judge that,
-    // because only the Farm can see everyone.
-    place: (animal, { farm } = {}) => farm?.nearestMate(animal) ?? null,
+    // Head for anyone it *could* breed with — only the Farm can judge that,
+    // since only the Farm can see everyone. But the urge is only relieved by
+    // reaching one who is also looking, because mating takes two.
+    place: (animal, { farm } = {}) => farm?.eligibleMate(animal) ?? null,
     satisfied: (animal, { farm } = {}) => {
-      const partner = farm?.nearestMate(animal);
+      const partner = farm?.willingMate(animal);
       return partner != null && distance(animal, partner) < animal.radius + partner.radius + 1;
     },
     narrate: (a) => `${a.name} goes looking for a mate.`,

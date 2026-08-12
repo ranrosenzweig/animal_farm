@@ -123,13 +123,32 @@ export default class Farm {
   /* ---------------------------------------------------------------- */
 
   /**
-   * The nearest animal `seeker` could actually breed with: **its own species**,
-   * the opposite sex, grown, not already carrying, and looking for the same
-   * thing. Cross-species pairings are impossible by construction — the species
-   * test is here, and this is the only way two animals are ever matched.
+   * The nearest animal `seeker` could breed with: **its own species**, the
+   * opposite sex, grown, and not already carrying. Says nothing about what
+   * either of them is currently doing.
+   *
+   * Cross-species pairing is impossible by construction — the species test is
+   * here, and every pairing in the model goes through this scan.
    * @returns {import("./Animal.js").default | null}
    */
-  nearestMate(seeker) {
+  eligibleMate(seeker) {
+    return this.nearestMateWhere(seeker);
+  }
+
+  /**
+   * The nearest eligible partner who is *also* looking for one. Mating takes
+   * two, so this is the test for the act itself — but not for whether wanting
+   * a mate is worth anything, which is `eligibleMate`. Conflating the two
+   * deadlocks the whole thing: if only a willing partner counts, nobody can
+   * be the first to want one.
+   * @returns {import("./Animal.js").default | null}
+   */
+  willingMate(seeker) {
+    return this.nearestMateWhere(seeker, (other) => other.goal === "mate");
+  }
+
+  /** @private */
+  nearestMateWhere(seeker, alsoWanted = () => true) {
     if (!seeker.canMate()) return null;
 
     let nearest = null;
@@ -138,7 +157,7 @@ export default class Farm {
       if (other === seeker) continue;
       if (other.species !== seeker.species) continue;
       if (other.sex === seeker.sex) continue;
-      if (!other.canMate() || other.goal !== "mate") continue;
+      if (!other.canMate() || !alsoWanted(other)) continue;
       const away = distance(seeker, other);
       if (away < shortest) {
         shortest = away;
@@ -157,7 +176,7 @@ export default class Farm {
    */
   courtship(mover) {
     if (mover.goal !== "mate") return null;
-    const partner = this.nearestMate(mover);
+    const partner = this.willingMate(mover);
     if (!partner) return null;
     if (distance(mover, partner) > mover.radius + partner.radius + 1) return null;
 

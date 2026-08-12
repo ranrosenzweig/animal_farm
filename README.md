@@ -284,5 +284,6 @@ npm install
 npm run dev     # the pasture UI at the printed localhost URL
 npm run demo    # exercise the model in the terminal, no browser
 npm run check   # overstock the pasture and audit every rule of movement and agency
+npm run probe   # run a long simulation and report on the farm's balance
 npm run build
 ```

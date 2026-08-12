@@ -86,6 +86,14 @@ export default class Animal {
   static baselinePressure = 0.35;
 
   /**
+   * @type {number} What a goal's pressure is worth when there is nowhere to
+   * go for it — no water in the field, no possible mate. Near zero, because
+   * an animal that cannot act on a want should not let it crowd out one it
+   * can act on. The drive itself keeps climbing; that is what kills.
+   */
+  static unreachable = 0.2;
+
+  /**
    * @param {string} name
    * @param {string} breed
    * @param {number} age  in years
@@ -189,7 +197,7 @@ export default class Animal {
         .map(([goal, affinity]) => ({
           goal,
           affinity,
-          pressure: this.pressureFor(goal),
+          pressure: this.pressureFor(goal, { neighbors, farm }),
         })),
       nearby: neighbors
         .map((n) => ({
@@ -202,10 +210,20 @@ export default class Animal {
     };
   }
 
-  /** How badly it wants a given goal right now, before species affinity. */
-  pressureFor(goalName) {
-    const relieves = GOALS[goalName]?.relieves;
-    return relieves ? this.drives[relieves] : this.constructor.baselinePressure;
+  /**
+   * How badly it wants a given goal right now, before species affinity.
+   *
+   * A goal with nowhere to go — no water left, no possible mate — is worth
+   * only a fraction of its drive, so it stops crowding out goals the animal
+   * can actually act on. It still wanders and the drive still climbs; this
+   * changes what it chooses, not what it suffers.
+   */
+  pressureFor(goalName, context = {}) {
+    const goal = GOALS[goalName];
+    if (!goal?.relieves) return this.constructor.baselinePressure;
+    const pressure = this.drives[goal.relieves];
+    if (goal.anywhere || goal.place(this, context) != null) return pressure;
+    return pressure * this.constructor.unreachable;
   }
 
   /**
