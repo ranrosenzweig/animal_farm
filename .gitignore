@@ -7,3 +7,7 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Personal Claude Code settings — holds the OpenRouter key. settings.json
+# (without .local) is the team-shared one and must stay free of secrets.
+.claude/settings.local.json

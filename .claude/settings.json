@@ -28,7 +28,9 @@
       "Bash(curl -s \"https://api.github.com/repos/multica-ai/andrej-karpathy-skills/git/trees/main?recursive=1\" -o \"C:/Users/Ran/AppData/Local/Temp/claude/c---git-ai-animal-farm/d3beb906-20f7-44b9-8202-0ae10e47cabb/scratchpad/tree.json\")",
       "Edit(/.claude/skills/extending-the-farm/**)",
       "Bash(node -e \"console.log\\(Object.entries\\(require\\('./package.json'\\).scripts\\).map\\(\\([k,v]\\)=>'  '+k.padEnd\\(7\\)+v\\).join\\('\\\\n'\\)\\)\")",
-      "Bash(grep -n -A 12 -i '^| *`model`\\\\|model.*field.*frontmatter\\\\|### model' C:/Users/Ran/.claude/projects/c---git-ai-animal-farm/d3beb906-20f7-44b9-8202-0ae10e47cabb/tool-results/toolu_01BSS8kGYxtsLYiyxzC4sEet.txt)"
+      "Bash(grep -n -A 12 -i '^| *`model`\\\\|model.*field.*frontmatter\\\\|### model' C:/Users/Ran/.claude/projects/c---git-ai-animal-farm/d3beb906-20f7-44b9-8202-0ae10e47cabb/tool-results/toolu_01BSS8kGYxtsLYiyxzC4sEet.txt)",
+      "Bash(curl -s \"https://openrouter.ai/api/v1/models\" -o \"C:/Users/Ran/AppData/Local/Temp/claude/c---git-ai-animal-farm/d3beb906-20f7-44b9-8202-0ae10e47cabb/scratchpad/or-models.json\")",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{try{const j=JSON.parse\\(s.split\\('\\\\nHTTP'\\)[0]\\);console.log\\('model served:',j.model\\);console.log\\('text:',JSON.stringify\\(\\(j.content||[]\\).filter\\(b=>b.type==='text'\\).map\\(b=>b.text\\).join\\(''\\)\\)\\);console.log\\('stop:',j.stop_reason\\);}catch\\(e\\){console.log\\(s.slice\\(0,400\\)\\);}}\\)\")"
     ]
   }
 }
