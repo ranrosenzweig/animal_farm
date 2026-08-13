@@ -313,6 +313,8 @@ the default, so `npm run check` and `npm run probe` stay offline and repeatable.
 
 ## Running it
 
+**Node 24+ required** (Vite + rolldown need it; `.nvmrc` documents this).
+
 ```sh
 npm install
 npm run dev     # the pasture UI at the printed localhost URL
@@ -322,4 +324,11 @@ npm run mind    # a short run with every animal deciding through Claude
 npm run check   # overstock the pasture and audit every rule of movement and agency
 npm run probe   # run a long simulation and report on the farm's balance
 npm run build
+```
+
+If you have Node 20.x and Node 24 both installed (e.g., on Windows), you can temporarily switch:
+```sh
+# On Windows: if Node 24 is at C:\Program Files\nodejs\
+set PATH=C:\Program Files\nodejs;%PATH%
+npm run dev
 ```
