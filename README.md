@@ -277,12 +277,48 @@ Subclass `Mind`, implement `decide(percept)`, set a `cadence`, and assign it:
 `animal.mind = new YourMind()`. Nothing about the body, the goals, or the
 collision rules changes.
 
+### The Claude-backed mind
+
+`ClaudeMind` is that same seam with a language model behind it. It posts the
+percept to a small proxy and gets back a goal and a reason:
+
+```js
+animal.mind = new ClaudeMind();   // browser: Vite forwards /decide to the proxy
+animal.mind = new ClaudeMind({ endpoint: "http://localhost:8787/decide" });  // Node
+```
+
+Two things about it are worth knowing.
+
+**It never waits.** `decide()` is called from inside `Farm.stepOne`, which is
+synchronous the whole way down. So each deliberation returns the answer to the
+*previous* one and sends the current percept off for the next — the animal is
+always acting on the last thing Claude said. At `cadence` 12 a deliberation is
+some seconds apart and the round trip is shorter than that, so the answer is
+already waiting by the time it's wanted. Until the first one arrives, and after
+any that fails, the animal keeps the goal it had; an unreachable mind is an
+animal carrying on, not an animal stopping.
+
+**The key is not in the page.** `server/decide.js` holds it and serves `/decide`;
+Vite forwards that in dev. Copy `.env.example` to `.env`, put a key in it, and:
+
+```sh
+npm run proxy   # the proxy on :8787
+npm run mind    # a short run with every animal thinking through Claude
+```
+
+The answer is constrained to an enum of the goals that animal actually has, so
+an invalid goal is impossible rather than merely unlikely. Every deliberation is
+a paid request — `cadence` is the dial that matters, and `ScriptedMind` is still
+the default, so `npm run check` and `npm run probe` stay offline and repeatable.
+
 ## Running it
 
 ```sh
 npm install
 npm run dev     # the pasture UI at the printed localhost URL
 npm run demo    # exercise the model in the terminal, no browser
+npm run proxy   # the /decide proxy, for animals given a ClaudeMind (needs .env)
+npm run mind    # a short run with every animal deciding through Claude
 npm run check   # overstock the pasture and audit every rule of movement and agency
 npm run probe   # run a long simulation and report on the farm's balance
 npm run build

@@ -6,13 +6,16 @@
   "description": "A model of a farm: an Animal base class, one class per species, and a Farm that keeps them.",
   "scripts": {
     "dev": "vite",
+    "proxy": "node --env-file=.env server/decide.js",
     "demo": "node scripts/demo.js",
+    "mind": "node scripts/claude-mind.js",
     "check": "node scripts/check.js",
     "probe": "node scripts/probe.js",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

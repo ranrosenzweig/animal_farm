@@ -19,4 +19,8 @@ const reloadOnModelChange = {
 
 export default defineConfig({
   plugins: [react(), reloadOnModelChange],
+  // ClaudeMind asks /decide what an animal should want. Forwarding it keeps the
+  // API key in the proxy, where the page cannot read it. Nothing else needs it,
+  // and the farm still runs with no proxy at all — see src/model/minds/.
+  server: { proxy: { "/decide": "http://localhost:8787" } },
 });
