@@ -9,7 +9,9 @@
 import Farm from "../src/model/Farm.js";
 import ClaudeMind from "../src/model/minds/ClaudeMind.js";
 
-const ENDPOINT = `http://localhost:${process.env.PORT ?? 8787}/decide`;
+// 127.0.0.1, not localhost: the proxy listens on loopback v4 only, and
+// localhost can resolve to ::1 first.
+const ENDPOINT = `http://127.0.0.1:${process.env.PORT ?? 8787}/decide`;
 const STEPS = 24;
 const CADENCE = 8;
 // The step loop cannot await a request, so the script has to leave the event

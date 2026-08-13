@@ -284,7 +284,7 @@ percept to a small proxy and gets back a goal and a reason:
 
 ```js
 animal.mind = new ClaudeMind();   // browser: Vite forwards /decide to the proxy
-animal.mind = new ClaudeMind({ endpoint: "http://localhost:8787/decide" });  // Node
+animal.mind = new ClaudeMind({ endpoint: "http://127.0.0.1:8787/decide" });  // Node
 ```
 
 Two things about it are worth knowing.
@@ -310,6 +310,14 @@ The answer is constrained to an enum of the goals that animal actually has, so
 an invalid goal is impossible rather than merely unlikely. Every deliberation is
 a paid request — `cadence` is the dial that matters, and `ScriptedMind` is still
 the default, so `npm run check` and `npm run probe` stay offline and repeatable.
+
+**It is a key on a socket, so it is deliberately hard to reach.** The proxy
+binds `127.0.0.1` and nothing else, accepts only loopback origins (and requests
+with no origin at all, which is how Node scripts arrive — a web page cannot
+omit one), caps bodies at 64 KB, refuses goals the farm doesn't define, and
+serves at most 60 requests a minute. Failures are logged in full here and
+reported to the caller in the vaguest terms that are still true. `HOST` and
+`RATE_LIMIT_PER_MINUTE` override the last two if you need them to.
 
 ## Running it
 
