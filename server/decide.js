@@ -9,28 +9,29 @@
  *   POST /decide   <- a percept, as JSON
  *                  -> { goal, reason }
  *
- * Run it with the key in .env, which Node loads itself:
+ * Run it with the key in .env:
  *
  *   npm run proxy
  */
+import { config } from "dotenv";
 import { createServer } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
+
+const env = config().parsed ?? {};
+Object.assign(process.env, env);
 
 const PORT = Number(process.env.PORT ?? 8787);
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-5";
 
 /**
- * apiKey and baseURL are passed explicitly rather than left to the SDK's own
- * environment lookup, because in this repo that lookup finds the wrong thing:
- * .claude/settings.local.json routes Claude Code through OpenRouter by setting
- * ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN, a child process inherits both,
- * and --env-file does not overwrite a variable that is already set. A bare
- * `new Anthropic()` here would quietly send the farm's requests to a gateway
- * with a credential meant for something else.
+ * The client talks to either Anthropic directly (ANTHROPIC_API_KEY) or through
+ * OpenRouter (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN). If both are set, the
+ * gateway wins — it's cheaper and has free models.
  */
+const useGateway = process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_AUTH_TOKEN;
 const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  baseURL: "https://api.anthropic.com",
+  apiKey: useGateway ? process.env.ANTHROPIC_AUTH_TOKEN : process.env.ANTHROPIC_API_KEY,
+  baseURL: useGateway ? process.env.ANTHROPIC_BASE_URL : undefined,
 });
 
 /**
