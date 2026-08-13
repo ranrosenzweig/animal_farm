@@ -153,8 +153,10 @@ const server = createServer(async (request, response) => {
   }
 });
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("No ANTHROPIC_API_KEY. Copy .env.example to .env and put a key in it.");
+const hasDirectKey = !!process.env.ANTHROPIC_API_KEY;
+const hasGatewayKey = !!(process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_AUTH_TOKEN);
+if (!hasDirectKey && !hasGatewayKey) {
+  console.error("No credentials. Set either ANTHROPIC_API_KEY or both ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN in .env");
   process.exit(1);
 }
 
