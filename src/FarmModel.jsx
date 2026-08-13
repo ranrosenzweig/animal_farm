@@ -397,7 +397,7 @@ export default function FarmModel() {
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
           font-weight: 400;
-          color: #8a7d5a;
+          color: #6b5f42;
         }
         .fa-drives { margin-top: 10px; display: grid; gap: 4px; }
         .fa-drive {
@@ -482,10 +482,10 @@ export default function FarmModel() {
           font-size: 10.5px;
           text-transform: uppercase;
           letter-spacing: 0.6px;
-          color: #8a7d5a;
+          color: #6b5f42;
         }
         .fa-yield .item { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-        .fa-yield .none { color: #8a7d5a; font-style: italic; }
+        .fa-yield .none { color: #6b5f42; font-style: italic; }
 
         .fa-add {
           background: white;
@@ -519,7 +519,7 @@ export default function FarmModel() {
           font-size: 10.5px;
           text-transform: uppercase;
           letter-spacing: 0.6px;
-          color: #8a7d5a;
+          color: #6b5f42;
           margin-bottom: 6px;
         }
         .fa-log-row {
