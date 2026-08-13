@@ -453,7 +453,7 @@ export default function FarmModel() {
           border: 1px solid var(--wood);
         }
 
-        .fa-source {
+        .fa-code {
           margin-top: 10px;
           background: #241f16;
           color: #e9dfc4;
@@ -692,7 +692,7 @@ export default function FarmModel() {
                 </button>
                 <button className="fa-btn alt" onClick={removeSelected}>Remove</button>
               </div>
-              {showSource && <div className="fa-source">{sourceOf(selected.species)}</div>}
+              {showSource && <div className="fa-code">{sourceOf(selected.species)}</div>}
             </div>
           )}
 
