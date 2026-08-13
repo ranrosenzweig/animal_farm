@@ -141,8 +141,15 @@ let herd = new Farm("Breeding", [], [
   new Resource("water", { x: 15, y: 25 }), new Resource("water", { x: 80, y: 68 }),
   new Resource("grass", { x: 35, y: 45 }), new Resource("grass", { x: 62, y: 45 }),
 ]);
+// One of each sex per pen, not two coin flips: `random()` picks a sex, so two
+// of a species are a same-sex pair half the time and all six pens are once in
+// sixty-four runs — which failed this check for want of a partner, not a bug.
 for (const Species of SPECIES) {
-  for (let i = 0; i < 2; i++) herd = herd.add(Species.random()).farm;
+  for (const sex of ["female", "male"]) {
+    const animal = Species.random();
+    animal.sex = sex;
+    herd = herd.add(animal).farm;
+  }
 }
 let calved = 0;
 for (let round = 1; round <= 1500; round++) {
