@@ -9,6 +9,7 @@ export default class Duck extends Animal {
   static breeds = ["Mallard", "Pekin", "Rouen", "Khaki Campbell"];
   static names = ["Quackers", "Puddles", "Donald", "Waddle", "Mallory"];
   static stepSize = 2.8;   // an unhurried waddle
+  static mass = 3;         // light enough to be knocked clean across the field
   static radius = 4.5;
   static turnRate = 0.45;  // waddles round quickly enough
 

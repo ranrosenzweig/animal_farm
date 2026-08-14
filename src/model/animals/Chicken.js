@@ -9,6 +9,7 @@ export default class Chicken extends Animal {
   static breeds = ["Rhode Island Red", "Leghorn", "Plymouth Rock", "Silkie"];
   static names = ["Henrietta", "Clucky", "Nugget", "Pecky", "Goldie"];
   static stepSize = 1.5;  // short, quick scurries
+  static mass = 2.5;      // the lightest thing in the field
   static radius = 4.5;
   static turnRate = 0.6;  // nimble — turns almost on the spot
 

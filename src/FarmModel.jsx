@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
-import { MUD, centroid, clampToPasture } from "./model/pasture.js";
+import { centroid, clampToPasture } from "./model/pasture.js";
+import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { RESOURCE_KINDS } from "./model/Resource.js";
 import ScriptedMind from "./model/minds/ScriptedMind.js";
@@ -71,6 +72,68 @@ function standing(spot) {
 /** The trapezoid the ground fills, in the ground layer's own box. */
 const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
   `${project({ x: 100, y: HORIZON }).x}% 0, 100% 100%, 0 100%)`;
+
+/**
+ * Where the trees stand in each wood, as fractions of the patch's radius.
+ * Fixed rather than random: the ground under them does not move between
+ * renders, so neither should they.
+ */
+const TREE_SPOTS = [[-0.45, -0.2], [0.4, -0.42], [0.02, 0.34], [-0.15, -0.62]];
+
+const TREES = PATCHES.filter((patch) => patch.ground === "wood").flatMap((patch, w) =>
+  TREE_SPOTS.map(([dx, dy], t) => ({
+    key: `${w}-${t}`,
+    x: patch.x + dx * patch.radius,
+    y: patch.y + dy * patch.radius,
+  })),
+);
+
+/**
+ * The lie of the land, drawn from the very numbers the animals walk on.
+ *
+ * Every hill here is one of `RELIEF`'s bumps and every patch one of `PATCHES`,
+ * at the same place and the same size — so this is not a picture of a field
+ * that resembles the model, it is the model, shaded. A rock you can see is a
+ * rock an animal bounces off, and the pale shoulder of a rise is the ground a
+ * cow will labour up.
+ *
+ * Each piece is laid down as a `fa-feature`, the same way a pond is: projected
+ * across, and foreshortened by the same 3:1 the ponds use. That matters more
+ * than it sounds. If the terrain were drawn flat while the herd was drawn in
+ * perspective, the rock on screen would not be where the rock in the model is,
+ * and every claim this makes would be a lie.
+ */
+function PastureTerrain() {
+  return (
+    <>
+      {RELIEF.map((bump, i) => (
+        <div
+          key={`relief-${i}`}
+          className={`fa-feature fa-relief ${bump.height > 0 ? "rise" : "hollow"}`}
+          aria-hidden="true"
+          style={{
+            left: `${project(bump).x}%`,
+            top: `${bump.y}%`,
+            width: `${bump.spread * 2.2 * sizeAt(bump.y)}%`,
+            opacity: Math.min(0.8, Math.abs(bump.height) * 1.5),
+          }}
+        />
+      ))}
+      {PATCHES.map((patch, i) => (
+        <div
+          key={`patch-${i}`}
+          className={`fa-feature fa-ground-${patch.ground}`}
+          aria-hidden="true"
+          style={{
+            left: `${project(patch).x}%`,
+            top: `${patch.y}%`,
+            width: `${patch.radius * 2 * sizeAt(patch.y)}%`,
+          }}
+        />
+      ))}
+    </>
+  );
+}
 
 /**
  * How long one step takes, until the farmer says otherwise. The sprite's CSS
@@ -477,6 +540,42 @@ export default function FarmModel() {
             repeating-linear-gradient(180deg, rgba(255,255,255,0.06) 0 1px, transparent 1px 6.5%),
             linear-gradient(180deg, #7d9c5c 0%, var(--field-1) 30%, var(--field-2) 100%);
         }
+        /* The lie of the land. Every one of these is a bump or a patch out of
+           terrain.js, drawn where the model keeps it — the sun is up and to
+           the left throughout, so a rise catches light on its near shoulder
+           and a hollow catches it on its far one, which is the whole of what
+           makes a dip read as a dip rather than a mound. */
+        .fa-relief.rise {
+          background: radial-gradient(ellipse at 38% 28%, #c8da91 0%, rgba(200,218,145,0) 68%);
+        }
+        .fa-relief.hollow {
+          background: radial-gradient(ellipse at 62% 72%, #294016 0%, rgba(41,64,22,0) 68%);
+        }
+        .fa-ground-mud {
+          background: radial-gradient(ellipse at 50% 40%, #7d5c3d 0%, #5c4229 60%, #46311d 100%);
+          box-shadow: inset 0 3px 6px rgba(0,0,0,0.4);
+          opacity: 0.85;
+        }
+        .fa-ground-wood {
+          background: radial-gradient(ellipse at 50% 45%, #35551f 0%, #24401a 100%);
+          opacity: 0.5;
+        }
+        /* Rock is drawn at exactly the radius animals bounce off, so what you
+           see is what they hit. Cool grey against all this green. */
+        .fa-ground-rock {
+          background: radial-gradient(ellipse at 42% 30%, #bcbbb4 0%, #8b8b86 45%, #4a4a47 100%);
+          box-shadow: 0 3px 5px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.35);
+        }
+        /* Trees stand on the woodland patches. Woodland only slows an animal,
+           so they are scenery over real ground rather than obstacles. */
+        .fa-tree {
+          position: absolute;
+          transform: translate(-50%, -62%) scale(var(--depth-scale, 1));
+          font-size: 19px;
+          pointer-events: none;
+          opacity: var(--haze, 1);
+          filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
         /* Two rails and a run of posts, drawn at foreground size. It sits above
            every sprite, so an animal at the front of the field passes behind
            it — which is most of what tells you the field has a front. */
@@ -632,11 +731,6 @@ export default function FarmModel() {
         .fa-grass {
           background: radial-gradient(ellipse at 50% 75%, #9ccb6c 0%, #6b9b41 55%, #4d7a2e 100%);
           box-shadow: inset 0 3px 5px rgba(30,50,20,0.35), 0 2px 3px rgba(38,48,26,0.28);
-        }
-        .fa-mud {
-          background: radial-gradient(ellipse at 50% 75%, #856544 0%, #5e442c 60%, #4a3421 100%);
-          box-shadow: inset 0 3px 6px rgba(0,0,0,0.4);
-          opacity: 0.75;
         }
         .fa-pasture.placing { cursor: crosshair; }
         .fa-pasture.placing .fa-sprite { cursor: crosshair; }
@@ -1068,15 +1162,13 @@ export default function FarmModel() {
         >
           <div className="fa-hills" aria-hidden="true" />
           <div className="fa-ground" aria-hidden="true" />
+          {/* The mud is no longer a landmark laid on the field — it is one of
+              the terrain's patches now, and gets drawn with the rest of them. */}
+          <PastureTerrain />
           <div className="fa-barn" style={standing({ x: 84, y: 18 })}>🏚️</div>
-          <div
-            className="fa-feature fa-mud"
-            style={{
-              left: `${project(MUD).x}%`,
-              top: `${MUD.y}%`,
-              width: `${19 * sizeAt(MUD.y)}%`,
-            }}
-          />
+          {TREES.map((tree) => (
+            <div key={tree.key} className="fa-tree" style={standing(tree)} aria-hidden="true">🌳</div>
+          ))}
           {farm.resources.map((source) => (
             <div
               key={source.id}
