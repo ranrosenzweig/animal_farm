@@ -53,6 +53,8 @@ let animalSteps = 0;
 let births = 0;
 let deaths = 0;
 let closestTie = 0;
+let contests = 0;
+let knownRivals = 0;   // contests between animals that already knew each other
 let worstOverlap = 0;
 let emptiedAt = null;
 
@@ -70,7 +72,10 @@ for (let step = 1; step <= STEPS; step++) {
   }
   worstOverlap = Math.max(worstOverlap, farm.overlaps().length);
 
-  const { farm: next, born, died } = farm.stepAll();
+  const settled = farm.stepAll();
+  const { farm: next, born, died } = settled;
+  contests += settled.contests.length;
+  knownRivals += settled.contests.filter((c) => c.loser.familiarity(c.winner) > 0.5).length;
   farm = next;
   births += born.length;
   deaths += died.length;
@@ -116,6 +121,12 @@ if (farm.size > 0) {
   const known = farm.animals.map((a) => a.bonds.size);
   const close = farm.animals.map((a) => [...a.bonds.values()].filter((t) => t > 0.5).length);
   console.log(`  each ended knowing ${mean(known)} others, ${mean(close)} of them well, in a herd of ${farm.size}`);
+}
+
+console.log("\nContests over a shared trough:");
+console.log(`  ${contests} in all — ${(animalSteps === 0 ? 0 : (contests / animalSteps) * 100).toFixed(1)} per 100 animal-steps`);
+if (contests > 0) {
+  console.log(`  ${pct(knownRivals / contests)} were between animals that already knew each other`);
 }
 
 console.log("\nIn the field:");

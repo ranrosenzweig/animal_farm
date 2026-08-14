@@ -11,3 +11,10 @@ dist/
 # Personal Claude Code settings — holds the OpenRouter key. settings.json
 # (without .local) is the team-shared one and must stay free of secrets.
 .claude/settings.local.json
+
+# Local Claude Code state: scratch worktrees, and skills installed for one
+# machine rather than agreed for the project. The farm's own skills live in
+# .claude/skills and are committed.
+.claude/worktrees/
+.claude/skills/mcp-builder/
+.claude/skills/skill-creator/

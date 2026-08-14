@@ -1,6 +1,7 @@
 import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomAngle, randomInt } from "./random.js";
+import { GOALS } from "./goals.js";
 import { ROCKS, standable } from "./terrain.js";
 import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
@@ -175,6 +176,54 @@ export default class Farm {
     return nearest;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Contests                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The one source both animals are making for, or null if they are not
+   * rivals. Jostling is not a contest: two animals in each other's way over
+   * nothing in particular simply walk around each other, as they always have.
+   * @returns {Resource | null}
+   * @private
+   */
+  contestedSource(a, b) {
+    const wanted = GOALS[a.goal]?.consumes;
+    if (!wanted || wanted !== GOALS[b.goal]?.consumes) return null;
+    const source = this.nearestResource(a, wanted);
+    return source && source === this.nearestResource(b, wanted) ? source : null;
+  }
+
+  /**
+   * Two animals after the same trough, one standing in the other's way.
+   *
+   * They settle it the way animals mostly do — by weight, not by fighting.
+   * The lighter one gives ground and pays for the encounter in fatigue; the
+   * heavier one keeps its line and its claim.
+   *
+   * What it costs is the interesting part. Two animals that know each other
+   * have settled this before and settle it again for almost nothing, while
+   * strangers have to work it out from scratch every time. That is why a
+   * newly mixed herd is a tired herd.
+   *
+   * @returns {{ winner, loser, source } | null} null when they weren't rivals
+   * @private
+   */
+  contest(mover, blocker) {
+    if (!mover.squaresUp || !blocker.squaresUp) return null;
+    const source = this.contestedSource(mover, blocker);
+    if (!source) return null;
+
+    const [winner, loser] = mover.strength >= blocker.strength
+      ? [mover, blocker]
+      : [blocker, mover];
+    const known = loser.familiarity(winner);
+    loser.giveWay(loser.constructor.strain * (1 - 0.75 * known));
+    winner.afterContest();
+    loser.afterContest();
+    return { winner, loser, source };
+  }
+
   /**
    * If `mover` is courting and has reached a willing partner, they mate and
    * the female takes. Called after the step, so animals pair where they
@@ -259,7 +308,19 @@ export default class Farm {
   isClear(point, mover) {
     return inBounds(point)
       && standable(point, mover.radius)
-      && this.animals.every((a) => a === mover || !mover.wouldCrowd(point, a));
+      && this.blockerAt(point, mover) === null;
+  }
+
+  /**
+   * Whose personal space is in the way at `point`, or null if the ground is
+   * free. Neither the fence nor a rock is an animal, so ground blocked by
+   * either answers null here — which is the difference between being hemmed
+   * in by the herd and being hemmed in by the world. Only the first kind is
+   * worth squaring up to.
+   * @returns {import("./Animal.js").default | null}
+   */
+  blockerAt(point, mover) {
+    return this.animals.find((a) => a !== mover && mover.wouldCrowd(point, a)) ?? null;
   }
 
   /**
@@ -382,11 +443,29 @@ export default class Farm {
    * "Blocked" now means it pushed and got nowhere — pressed into a rock, or
    * into a neighbour heavy enough to ignore it — which is its cue to lean off
    * its line and try a different one next step.
+   *
+   * It is also where a contest starts. Being stuck is the trigger, so this
+   * asks the same question the old stepping did: is the thing in the way an
+   * *animal*, and are the two of us after the same trough? A body wedged
+   * against a rock or a rail has nobody to square up to, and jostling over
+   * nothing in particular is traffic rather than a contest.
    * @returns {"moved" | "resting" | "blocked"}
    * @private
    */
-  outcomeFor(animal, from) {
+  outcomeFor(animal, from, contests = []) {
     if (animal.isStill()) return "resting";
+
+    // A contest is about the way being barred, not about being pinned. Under
+    // the old stepping those were the same thing — an animal with nowhere to
+    // put its foot simply didn't move — but a body gets shoved and slides, so
+    // it is nearly always carried *somewhere*. Asking "would a full stride put
+    // me inside someone?" is the question that survived the change. Firing it
+    // every step rather than only when stuck is safe because `contestRest`
+    // already exists to stop a queue at a trough becoming a brawl.
+    const blocker = this.blockerAt(animal.positionAfter(animal.facing), animal);
+    const settled = blocker && this.contest(animal, blocker);
+    if (settled) contests.push(settled);
+
     if (Math.hypot(animal.x - from.x, animal.y - from.y) <= STOPPED) {
       animal.balk();
       return "blocked";
@@ -405,12 +484,15 @@ export default class Farm {
    */
   step(id) {
     const mover = this.find(id);
-    if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null, died: [] };
+    if (!mover) {
+      return { farm: this, moved: false, outcome: "missing", intention: null, died: [], contests: [] };
+    }
 
     const from = { x: mover.x, y: mover.y };
+    const contests = [];
     this.drive(mover);
     this.resolve();
-    const outcome = this.outcomeFor(mover, from);
+    const outcome = this.outcomeFor(mover, from, contests);
     this.courtship(mover);
 
     const born = this.deliver();
@@ -421,6 +503,7 @@ export default class Farm {
       intention: { ...mover.intention },
       died: mover.isAlive() ? [] : [mover],
       born,
+      contests,
     };
   }
 
@@ -436,8 +519,9 @@ export default class Farm {
     this.resolve();
 
     let moved = 0;
+    const contests = [];
     for (const was of before) {
-      if (this.outcomeFor(was.animal, was) === "moved") moved += 1;
+      if (this.outcomeFor(was.animal, was, contests) === "moved") moved += 1;
       this.courtship(was.animal); // a pair that met and stopped is still a pair
     }
 
@@ -448,6 +532,7 @@ export default class Farm {
       born,
       died: this.animals.filter((a) => !a.isAlive()),
       dried: this.resources.filter((r) => r.depleted),
+      contests,
     };
   }
 

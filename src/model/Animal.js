@@ -76,6 +76,20 @@ export default class Animal {
     hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005, urge: 0.003,
   };
 
+  /**
+   * @type {number} Fatigue the loser of a contest pays for having had it out
+   * with a total stranger. Knowing the other animal makes it cheaper.
+   */
+  static strain = 0.05;
+
+  /**
+   * @type {number} Steps before it will square up to anyone again. A contest
+   * is an event, not a condition: without this, an animal queueing at a
+   * trough is blocked on every single step and so contests on every single
+   * step, which buries the herd in fatigue.
+   */
+  static contestRest = 40;
+
   /** @type {number} How much a tie strengthens per step spent in someone's company. */
   static bonding = 0.02;
 
@@ -147,6 +161,10 @@ export default class Animal {
     this.veer = 0;
 
     this.sex = pick(["male", "female"]);
+    /** What this one, rather than its kind, brings to a contest. */
+    this.vigour = 0.85 + Math.random() * 0.3;
+    /** Steps left before it will square up to anyone again. */
+    this.contestCooldown = 0;
     this.drives = startingDrives();
     /** Condition, 0–1. Falls only while a drive is pinned at its limit. At 0 it dies. */
     this.health = 1;
@@ -390,6 +408,19 @@ export default class Animal {
     this.stepsAlive += 1;
     if (this.age === 0 && this.stepsAlive >= this.constructor.maturesAt) this.age = 1;
     if (this.pregnancy) this.pregnancy.left -= 1;
+    if (this.contestCooldown > 0) this.contestCooldown -= 1;
+  }
+
+  /**
+   * How much of a goal's full relief being here has earned, 0–1. A goal that
+   * consumes is limited by what its source could give; one that sets its own
+   * `worth` is limited by that; anything else pays in full.
+   * @returns {number}
+   * @private
+   */
+  shareOf(goal, context) {
+    if (goal.consumes) return this.consume(goal, context);
+    return goal.worth ? goal.worth(this, context) : 1;
   }
 
   /**
@@ -487,6 +518,35 @@ export default class Animal {
   /** Set a tie outright, rather than waiting for it to form. */
   bondTo(other, tie = 1) {
     this.bonds.set(other.id, clamp01(tie));
+  }
+
+  /**
+   * What it brings to a contest over a trough — size and maturity do most of
+   * the work, with a little that is simply this animal's own. It is never
+   * compared across anything but a blocked step, so the units don't matter;
+   * only which of two numbers is larger.
+   */
+  get strength() {
+    return this.radius * (this.isAdult ? 1 : 0.5) * this.vigour;
+  }
+
+  /**
+   * Give ground. It keeps wanting whatever it wanted — losing does not change
+   * an animal's mind — but it turns well off the line it was walking and pays
+   * for the encounter in fatigue. It will be back at the trough later, and
+   * further down the queue than it was.
+   */
+  giveWay(cost) {
+    this.veer = normalizeAngle(this.veer + this.spin * Math.PI * 0.5);
+    this.drives.fatigue = clamp01(this.drives.fatigue + cost);
+  }
+
+  /** True while it is willing to square up to anyone at all. */
+  get squaresUp() { return this.contestCooldown === 0; }
+
+  /** Had it out with someone; it will let the next one pass for a while. */
+  afterContest() {
+    this.contestCooldown = this.constructor.contestRest;
   }
 
   /* ---------------------------------------------------------------- */
@@ -615,6 +675,18 @@ export default class Animal {
   /** Got through: bleed off the detour and get back to where it was headed. */
   settle() {
     this.veer = Math.abs(this.veer) < 0.05 ? 0 : this.veer * 0.5;
+  }
+
+  /**
+   * Where this animal would stand if it walked `angle` for `dist`.
+   *
+   * Nothing moves anything by this any more — the body goes where the forces
+   * carry it. It survives because it is how the farm looks *ahead*: to ask who
+   * is in the way of an animal that pushed and got nowhere, you need the spot
+   * it was trying to reach.
+   */
+  positionAfter(angle, dist = this.stepSize) {
+    return { x: this.x + Math.cos(angle) * dist, y: this.y + Math.sin(angle) * dist };
   }
 
   /** True if standing at `point` would put this animal inside `other`'s space. */
