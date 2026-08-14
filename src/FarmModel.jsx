@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
-import { MUD } from "./model/pasture.js";
+import { PASTURE } from "./model/pasture.js";
+import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { sourceOf } from "./sources.js";
 
@@ -11,6 +12,157 @@ const GOAL_ICONS = {
 };
 
 const SEX_MARKS = { female: "♀", male: "♂" };
+
+/**
+ * The sun, for shading the hills. Up and to the left, so a rise catches light
+ * on its near-left shoulder and throws shadow down and right. Everything on
+ * the field is lit the same way or the relief reads as a set of stains.
+ */
+const SUN = { x: -0.16, y: -0.20 };
+
+/**
+ * Where the trees stand in each wood, as fractions of the patch's radius.
+ * Fixed rather than random: the ground under them does not move between
+ * renders, so neither should they.
+ */
+const TREE_SPOTS = [[-0.45, -0.2], [0.4, -0.42], [0.02, 0.34], [-0.15, -0.62]];
+
+const woods = PATCHES.filter((patch) => patch.ground === "wood");
+const TREES = woods.flatMap((patch, w) =>
+  TREE_SPOTS.map(([dx, dy], t) => ({
+    key: `${w}-${t}`,
+    x: patch.x + dx * patch.radius,
+    y: patch.y + dy * patch.radius,
+  })),
+);
+
+/**
+ * The ground, drawn from the very numbers the animals walk on.
+ *
+ * Every hill here is one of `RELIEF`'s bumps and every patch one of
+ * `PATCHES`, at the same place and the same size, so this is not a picture of
+ * a field that resembles the model — it is the model, shaded. A rock you can
+ * see is a rock an animal bounces off, and the pale shoulder of a rise is the
+ * ground a cow will labour up.
+ *
+ * The viewBox is stretched to the pasture's shape on purpose. The model
+ * already measures in percentages of the box and treats a circle as an
+ * ellipse on a field that isn't square, so drawing it the same way is what
+ * keeps the two honest with one another.
+ */
+function PastureGround() {
+  const { minY } = PASTURE;
+  return (
+    <svg className="fa-ground" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="fa-sky-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#bcd3e4" />
+          <stop offset="100%" stopColor="#e6eddc" />
+        </linearGradient>
+        <linearGradient id="fa-field-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#7ba055" />
+          <stop offset="100%" stopColor="#3f5a29" />
+        </linearGradient>
+        <radialGradient id="fa-mud-fill" cx="45%" cy="38%">
+          <stop offset="0%" stopColor="#7d5c3d" />
+          <stop offset="100%" stopColor="#46311d" />
+        </radialGradient>
+        {/* One highlight and one shadow per bump, offset along the sun. A
+            hollow gets them the other way round, which is the whole of what
+            makes a dip read as a dip rather than a mound. */}
+        {RELIEF.map((bump, i) => {
+          const sunward = bump.height > 0 ? 1 : -1;
+          const lit = Math.min(0.75, Math.abs(bump.height) * 1.5);
+          const dark = Math.min(0.6, Math.abs(bump.height) * 1.25);
+          return [
+            <radialGradient
+              key={`lit${i}`}
+              id={`fa-lit-${i}`}
+              cx={`${50 + SUN.x * 100 * sunward}%`}
+              cy={`${50 + SUN.y * 100 * sunward}%`}
+              r="62%"
+            >
+              <stop offset="0%" stopColor="#c3d78c" stopOpacity={lit} />
+              <stop offset="100%" stopColor="#c3d78c" stopOpacity="0" />
+            </radialGradient>,
+            <radialGradient
+              key={`shade${i}`}
+              id={`fa-shade-${i}`}
+              cx={`${50 - SUN.x * 100 * sunward}%`}
+              cy={`${50 - SUN.y * 100 * sunward}%`}
+              r="62%"
+            >
+              <stop offset="0%" stopColor="#2c4519" stopOpacity={dark} />
+              <stop offset="100%" stopColor="#2c4519" stopOpacity="0" />
+            </radialGradient>,
+          ];
+        })}
+        {/* Nothing on the field may spill up into the sky. */}
+        <clipPath id="fa-field-clip">
+          <rect x="0" y={minY} width="100" height={100 - minY} />
+        </clipPath>
+      </defs>
+
+      <rect x="0" y="0" width="100" height={minY} fill="url(#fa-sky-fill)" />
+      {/* Two ridges beyond the fence, the farther one hazier, so the field
+          ends against something instead of simply stopping. */}
+      <path
+        d={`M0 ${minY} L0 9 Q 14 3 27 8 Q 41 13 54 6 Q 68 0 82 7 Q 92 12 100 6 L100 ${minY} Z`}
+        fill="#a9c0a6"
+        opacity="0.55"
+      />
+      <path
+        d={`M0 ${minY} L0 13 Q 16 8 30 12 Q 44 16 58 11 Q 73 6 86 12 Q 94 15 100 12 L100 ${minY} Z`}
+        fill="#7d9a72"
+        opacity="0.7"
+      />
+
+      <g clipPath="url(#fa-field-clip)">
+        <rect x="0" y={minY} width="100" height={100 - minY} fill="url(#fa-field-fill)" />
+        {RELIEF.map((bump, i) => (
+          <g key={i}>
+            <ellipse cx={bump.x} cy={bump.y} rx={bump.spread * 1.15} ry={bump.spread * 1.15}
+              fill={`url(#fa-lit-${i})`} />
+            <ellipse cx={bump.x} cy={bump.y} rx={bump.spread * 1.15} ry={bump.spread * 1.15}
+              fill={`url(#fa-shade-${i})`} />
+          </g>
+        ))}
+        {PATCHES.map((patch, i) => {
+          if (patch.ground === "mud") {
+            return <ellipse key={i} cx={patch.x} cy={patch.y} rx={patch.radius} ry={patch.radius}
+              fill="url(#fa-mud-fill)" opacity="0.85" />;
+          }
+          if (patch.ground === "wood") {
+            return <ellipse key={i} cx={patch.x} cy={patch.y} rx={patch.radius} ry={patch.radius}
+              fill="#294519" opacity="0.4" />;
+          }
+          // Rock: drawn at exactly its own radius, because that circle is the
+          // thing animals bounce off — what you see is what they hit. Cool
+          // grey against all this green, so it reads as stone and not as mud.
+          return (
+            <g key={i}>
+              <ellipse cx={patch.x} cy={patch.y} rx={patch.radius} ry={patch.radius} fill="#4a4a47" />
+              <ellipse
+                cx={patch.x + SUN.x * patch.radius * 0.5}
+                cy={patch.y + SUN.y * patch.radius * 0.5}
+                rx={patch.radius * 0.82}
+                ry={patch.radius * 0.82}
+                fill="#8b8b86"
+              />
+              <ellipse
+                cx={patch.x + SUN.x * patch.radius}
+                cy={patch.y + SUN.y * patch.radius}
+                rx={patch.radius * 0.42}
+                ry={patch.radius * 0.42}
+                fill="#b5b4ad"
+              />
+            </g>
+          );
+        })}
+      </g>
+    </svg>
+  );
+}
 
 const RESOURCE_ICONS = { water: "💧", grass: "🌿" };
 
@@ -219,8 +371,10 @@ export default function FarmModel() {
           min-height: 360px;
           border-radius: 10px;
           overflow: hidden;
-          background:
-            linear-gradient(180deg, var(--sky) 0%, var(--sky-2) 26%, var(--field-1) 30%, var(--field-2) 100%);
+          /* Only what shows through before the terrain paints. The sky, the
+             horizon and the field all come from PastureGround now, so they are
+             in one place and that place is the model. */
+          background: var(--field-2);
           border: 3px solid var(--wood-dark);
         }
         .fa-fence {
@@ -230,9 +384,29 @@ export default function FarmModel() {
           background: repeating-linear-gradient(90deg, var(--wood) 0 6px, transparent 6px 22px);
           opacity: 0.55;
         }
+        /* The terrain, under everything. It is drawn, not decorative: the
+           hills, rocks and mud here are the ones in the model. */
+        .fa-ground {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+        }
+        /* Trees sit on the woodland patches. Woodland only slows an animal, so
+           they are scenery over real ground rather than obstacles. */
+        .fa-tree {
+          position: absolute;
+          transform: translate(-50%, -62%);
+          font-size: 19px;
+          pointer-events: none;
+          filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
+        /* Below the horizon, or it reads as floating in the sky above the
+           hills. The field starts at PASTURE.minY, which is 16%. */
         .fa-barn {
           position: absolute;
-          right: 18px; top: 10px;
+          right: 18px; top: 17%;
           font-size: 34px;
           opacity: 0.85;
           filter: drop-shadow(0 2px 2px rgba(0,0,0,0.25));
@@ -332,11 +506,6 @@ export default function FarmModel() {
         }
         .fa-grass {
           background: radial-gradient(ellipse at 45% 40%, #8cbf5f, #4d7a2e);
-        }
-        .fa-mud {
-          width: 19%; height: 13%;
-          background: radial-gradient(ellipse at 45% 40%, #7a5b3f, #4a3421);
-          opacity: 0.7;
         }
         .fa-pasture.placing { cursor: crosshair; }
         .fa-pasture.placing .fa-sprite { cursor: crosshair; }
@@ -569,8 +738,11 @@ export default function FarmModel() {
 
       <div className="fa-body">
         <div className={"fa-pasture" + (placing ? " placing" : "")} onClick={placeAt}>
+          <PastureGround />
           <div className="fa-barn">🏚️</div>
-          <div className="fa-feature fa-mud" style={{ left: `${MUD.x}%`, top: `${MUD.y}%` }} />
+          {TREES.map((tree) => (
+            <div key={tree.key} className="fa-tree" style={{ left: `${tree.x}%`, top: `${tree.y}%` }}>🌳</div>
+          ))}
           {farm.resources.map((source) => (
             <div
               key={source.id}
