@@ -749,7 +749,13 @@ export default function FarmModel() {
           border-radius: 3px;
           overflow: hidden;
         }
-        .fa-drive .fill { height: 100%; transition: width var(--step-duration, 600ms) linear; }
+        /* A span is inline, and width does nothing to an inline box — without
+           the display, every bar draws as an empty track at every value. */
+        .fa-drive .fill {
+          display: block;
+          height: 100%;
+          transition: width var(--step-duration, 600ms) linear;
+        }
         .fa-drive .pct {
           width: 30px;
           text-align: right;
