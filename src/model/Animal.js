@@ -1,7 +1,7 @@
 import { nextId, pick, randomAngle, randomInt } from "./random.js";
 import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js";
 import { DRIVES, clamp01, startingDrives } from "./drives.js";
-import { GOALS, atGoal } from "./goals.js";
+import { GOALS, atGoal, companyFor } from "./goals.js";
 import { RESOURCE_NAMES } from "./Resource.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
 
@@ -64,6 +64,29 @@ export default class Animal {
     hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005, urge: 0.003,
   };
 
+  /**
+   * @type {number} Fatigue the loser of a contest pays for having had it out
+   * with a total stranger. Knowing the other animal makes it cheaper.
+   */
+  static strain = 0.05;
+
+  /**
+   * @type {number} Steps before it will square up to anyone again. A contest
+   * is an event, not a condition: without this, an animal queueing at a
+   * trough is blocked on every single step and so contests on every single
+   * step, which buries the herd in fatigue.
+   */
+  static contestRest = 40;
+
+  /** @type {number} How much a tie strengthens per step spent in someone's company. */
+  static bonding = 0.02;
+
+  /**
+   * @type {number} How much a tie fades per step apart. An order of magnitude
+   * slower than it forms: company is quicker to make than to forget.
+   */
+  static forgetting = 0.002;
+
   /** @type {number} Steps a female carries young before giving birth. */
   static gestation = 300;
 
@@ -120,6 +143,10 @@ export default class Animal {
     this.veer = 0;
 
     this.sex = pick(["male", "female"]);
+    /** What this one, rather than its kind, brings to a contest. */
+    this.vigour = 0.85 + Math.random() * 0.3;
+    /** Steps left before it will square up to anyone again. */
+    this.contestCooldown = 0;
     this.drives = startingDrives();
     /** Condition, 0–1. Falls only while a drive is pinned at its limit. At 0 it dies. */
     this.health = 1;
@@ -131,6 +158,11 @@ export default class Animal {
     this.stepsAlive = 0;
     /** `{ mother, father, species }` for animals that were born here, else null. */
     this.parents = null;
+    /**
+     * Who it knows, by id, 0 (a stranger) to 1. Ties form by standing
+     * together and fade apart — see `keepCompany`.
+     */
+    this.bonds = new Map();
     /** What it is currently trying to do, and why. */
     this.intention = { goal: "roam", reason: "newly arrived" };
     /** Whatever decides that. Replaceable per animal. */
@@ -204,6 +236,8 @@ export default class Animal {
           name: n.name,
           species: n.species,
           distance: Math.round(distance(this, n)),
+          // 0 for one it has never stood with, 1 for one it knows well.
+          familiarity: Math.round(this.familiarity(n) * 100) / 100,
         }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 5),
@@ -252,9 +286,10 @@ export default class Animal {
     const relief = this.constructor.relief;
     const current = GOALS[this.goal];
     if (current?.relieves && atGoal(this, this.goal, context)) {
-      // Standing at a dry pond is not drinking. A goal that consumes pays off
-      // only in proportion to what the source could actually give.
-      const share = current.consumes ? this.consume(current, context) : 1;
+      // Standing at a dry pond is not drinking, and a stranger is not a
+      // friend. Either way a goal pays off only in proportion to what being
+      // there was actually worth.
+      const share = this.shareOf(current, context);
       if (share > 0) {
         this.drives[current.relieves] = clamp01(this.drives[current.relieves] - relief * share);
       }
@@ -266,7 +301,8 @@ export default class Animal {
     for (const [name, goal] of Object.entries(GOALS)) {
       if (!goal.passive || name === this.goal || !goal.relieves) continue;
       if (!atGoal(this, name, context)) continue;
-      this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - relief / 4);
+      const share = this.shareOf(goal, context);
+      this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - (relief / 4) * share);
     }
 
     this.grow();
@@ -282,6 +318,19 @@ export default class Animal {
     this.stepsAlive += 1;
     if (this.age === 0 && this.stepsAlive >= this.constructor.maturesAt) this.age = 1;
     if (this.pregnancy) this.pregnancy.left -= 1;
+    if (this.contestCooldown > 0) this.contestCooldown -= 1;
+  }
+
+  /**
+   * How much of a goal's full relief being here has earned, 0–1. A goal that
+   * consumes is limited by what its source could give; one that sets its own
+   * `worth` is limited by that; anything else pays in full.
+   * @returns {number}
+   * @private
+   */
+  shareOf(goal, context) {
+    if (goal.consumes) return this.consume(goal, context);
+    return goal.worth ? goal.worth(this, context) : 1;
   }
 
   /**
@@ -300,14 +349,21 @@ export default class Animal {
    * Going without tells. An animal wears down only while a drive is pinned at
    * its limit — being merely hungry costs it nothing — and it mends whenever
    * neither is. Reaching zero is the end of it.
+   *
+   * Solitude is the exception: it never kills, but an animal left entirely
+   * alone holds its condition where it stands instead of mending. Only hunger
+   * and thirst can be written on a headstone.
    * @private
    */
   wear() {
     const parched = this.drives.thirst >= 1;
     const starving = this.drives.hunger >= 1;
+    const alone = this.drives.loneliness >= 1;
     const { frailty, recovery } = this.constructor;
 
-    this.health = clamp01(this.health + (parched || starving ? -frailty : recovery));
+    if (parched || starving) this.health = clamp01(this.health - frailty);
+    else if (!alone) this.health = clamp01(this.health + recovery);
+
     if (this.health <= 0 && !this.endedBy) {
       this.endedBy = parched ? "thirst" : "hunger";
     }
@@ -319,6 +375,76 @@ export default class Animal {
   /** Why it died, in words. */
   epitaph() {
     return `${this.name} the ${this.species.toLowerCase()} died of ${this.endedBy ?? "unknown causes"}.`;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Company                                                           */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * How well it knows `other`: 0 for a stranger, 1 for one it has spent a
+   * long time standing beside.
+   */
+  familiarity(other) {
+    return this.bonds.get(other.id) ?? 0;
+  }
+
+  /**
+   * Take note of who it has been standing with. Ties to present company
+   * strengthen, everyone else fades, and one worn through to nothing is
+   * dropped rather than kept at zero — which is also how the dead and the
+   * long departed leave an animal's acquaintance.
+   *
+   * This only ever writes to `this`. Two animals near each other each keep
+   * their own side of the tie, and a round in which both are stepped leaves
+   * the pair agreeing.
+   */
+  keepCompany(neighbors = []) {
+    const { bonding, forgetting } = this.constructor;
+    const present = new Set(companyFor(this, neighbors).map((n) => n.id));
+
+    for (const [id, tie] of this.bonds) {
+      if (present.has(id)) continue;
+      if (tie <= forgetting) this.bonds.delete(id);
+      else this.bonds.set(id, tie - forgetting);
+    }
+    for (const id of present) {
+      this.bonds.set(id, clamp01((this.bonds.get(id) ?? 0) + bonding));
+    }
+  }
+
+  /** Set a tie outright, rather than waiting for it to form. */
+  bondTo(other, tie = 1) {
+    this.bonds.set(other.id, clamp01(tie));
+  }
+
+  /**
+   * What it brings to a contest over a trough — size and maturity do most of
+   * the work, with a little that is simply this animal's own. It is never
+   * compared across anything but a blocked step, so the units don't matter;
+   * only which of two numbers is larger.
+   */
+  get strength() {
+    return this.radius * (this.isAdult ? 1 : 0.5) * this.vigour;
+  }
+
+  /**
+   * Give ground. It keeps wanting whatever it wanted — losing does not change
+   * an animal's mind — but it turns well off the line it was walking and pays
+   * for the encounter in fatigue. It will be back at the trough later, and
+   * further down the queue than it was.
+   */
+  giveWay(cost) {
+    this.veer = normalizeAngle(this.veer + this.spin * Math.PI * 0.5);
+    this.drives.fatigue = clamp01(this.drives.fatigue + cost);
+  }
+
+  /** True while it is willing to square up to anyone at all. */
+  get squaresUp() { return this.contestCooldown === 0; }
+
+  /** Had it out with someone; it will let the next one pass for a while. */
+  afterContest() {
+    this.contestCooldown = this.constructor.contestRest;
   }
 
   /* ---------------------------------------------------------------- */

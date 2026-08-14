@@ -20,6 +20,22 @@ function fromSource(kind) {
 }
 
 /**
+ * Whoever is standing near enough to `animal` to count as company. Close
+ * enough to touch, near enough to matter — the one definition of "together",
+ * used both to judge whether an animal is lonely and to decide who it comes
+ * to know.
+ */
+export const companyFor = (animal, neighbors = []) =>
+  neighbors.filter((n) => distance(animal, n) < animal.radius * 2.2);
+
+/**
+ * What the company of a stranger is worth against that of a familiar animal.
+ * Not nothing — a body beside you is still a body — but an animal settles far
+ * faster among the ones it knows.
+ */
+const STRANGER = 0.35;
+
+/**
  * What an animal can be trying to do.
  *
  * A goal is the unit a Mind chooses between. It answers three questions and
@@ -32,6 +48,8 @@ function fromSource(kind) {
  *   place     where it has to be; null means anywhere, or nowhere in particular
  *   anywhere  true when being there isn't required (resting)
  *   still     true when pursuing it means not moving at all
+ *   worth     0–1, how much of the full relief being there has earned; a goal
+ *             without one pays in full
  */
 export const GOALS = {
   graze: {
@@ -61,8 +79,16 @@ export const GOALS = {
       centroid(neighbors),
     // Satisfied by proximity, not by reaching the centroid: standing near
     // anyone is company, and the centroid moves as the others do.
-    satisfied: (animal, { neighbors = [] } = {}) =>
-      neighbors.some((n) => distance(animal, n) < animal.radius * 2.2),
+    satisfied: (animal, { neighbors = [] } = {}) => companyFor(animal, neighbors).length > 0,
+    // But company is not all worth the same. The best-known face standing
+    // with it sets what the company is worth, so a newcomer among strangers
+    // settles slowly, and an animal put back among its own settles at once.
+    worth: (animal, { neighbors = [] } = {}) => {
+      const company = companyFor(animal, neighbors);
+      if (company.length === 0) return 0;
+      const known = Math.max(...company.map((n) => animal.familiarity(n)));
+      return STRANGER + (1 - STRANGER) * known;
+    },
     // Company counts whether or not the animal went looking for it — so a
     // chicken that never chooses to flock still isn't lonely in a crowd.
     passive: true,

@@ -117,6 +117,7 @@ export default function FarmModel() {
   const [dropAt, setDropAt] = useState(null);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
+  const companions = selected ? farm.companionsOf(selected) : [];
   const census = farm.census();
   const produce = farm.dailyProduce();
   const activity = farm.activity();
@@ -660,6 +661,52 @@ export default function FarmModel() {
         .fa-attr-row .l { color: #6b5f42; }
         .fa-attr-row .v { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
 
+        .fa-bonds { margin-top: 10px; display: grid; gap: 4px; }
+        .fa-bonds .lbl {
+          font-size: 10.5px;
+          text-transform: uppercase;
+          letter-spacing: 0.6px;
+          color: #6b5f42;
+        }
+        .fa-bonds .none { font-size: 11px; color: #6b5f42; font-style: italic; }
+        .fa-bonds .tie {
+          font-family: 'Inter', sans-serif;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          width: 100%;
+          padding: 1px 0;
+          border: none;
+          background: none;
+          cursor: pointer;
+          font-size: 11px;
+          color: #6b5f42;
+          text-align: left;
+        }
+        .fa-bonds .tie:hover .who { color: var(--wood); }
+        .fa-bonds .who {
+          width: 96px;
+          flex-shrink: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .fa-bonds .bar {
+          flex: 1;
+          height: 5px;
+          background: #e3d6b3;
+          border-radius: 3px;
+          overflow: hidden;
+        }
+        .fa-bonds .fill {
+          /* A span is inline, and width does nothing to an inline box —
+             without this the bar is an empty track at every tie strength. */
+          display: block;
+          height: 100%;
+          background: var(--wood);
+          transition: width var(--step-duration, 600ms) linear;
+        }
+
         .fa-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
         .fa-btn {
           font-family: 'Inter', sans-serif;
@@ -938,6 +985,26 @@ export default function FarmModel() {
                     <span className="v">{attr.value}</span>
                   </div>
                 ))}
+              </div>
+              <div className="fa-bonds">
+                <span className="lbl">Keeps company with</span>
+                {companions.length === 0 ? (
+                  <span className="none">nobody yet</span>
+                ) : (
+                  companions.map(({ animal, tie }) => (
+                    <button
+                      className="tie"
+                      key={animal.id}
+                      onClick={() => setSelectedId(animal.id)}
+                      title={`${Math.round(tie * 100)}% familiar`}
+                    >
+                      <span className="who">{animal.emoji} {animal.name}</span>
+                      <span className="bar">
+                        <span className="fill" style={{ width: `${tie * 100}%` }} />
+                      </span>
+                    </button>
+                  ))
+                )}
               </div>
               <div className="fa-actions">
                 <button className="fa-btn" onClick={() => runAction("makeSound")}>🔊 Make sound</button>

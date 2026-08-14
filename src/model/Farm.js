@@ -1,6 +1,7 @@
 import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
-import { randomInt } from "./random.js";
+import { randomAngle, randomInt } from "./random.js";
+import { GOALS } from "./goals.js";
 import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
 
 /**
@@ -78,6 +79,20 @@ export default class Farm {
 
   bySpecies(species) {
     return this.animals.filter((a) => a.species === species);
+  }
+
+  /**
+   * Who `animal` knows best, closest tie first. An animal holds nothing but
+   * ids; only the farm can say whose they are — and only the farm can leave
+   * out the ones who have since died or been taken away.
+   * @returns {{ animal: import("./Animal.js").default, tie: number }[]}
+   */
+  companionsOf(animal, limit = 3) {
+    return this.animals
+      .filter((other) => other !== animal && animal.familiarity(other) > 0)
+      .map((other) => ({ animal: other, tie: animal.familiarity(other) }))
+      .sort((a, b) => b.tie - a.tie)
+      .slice(0, limit);
   }
 
   /* ---------------------------------------------------------------- */
@@ -167,6 +182,54 @@ export default class Farm {
     return nearest;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Contests                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The one source both animals are making for, or null if they are not
+   * rivals. Jostling is not a contest: two animals in each other's way over
+   * nothing in particular simply walk around each other, as they always have.
+   * @returns {Resource | null}
+   * @private
+   */
+  contestedSource(a, b) {
+    const wanted = GOALS[a.goal]?.consumes;
+    if (!wanted || wanted !== GOALS[b.goal]?.consumes) return null;
+    const source = this.nearestResource(a, wanted);
+    return source && source === this.nearestResource(b, wanted) ? source : null;
+  }
+
+  /**
+   * Two animals after the same trough, one standing in the other's way.
+   *
+   * They settle it the way animals mostly do — by weight, not by fighting.
+   * The lighter one gives ground and pays for the encounter in fatigue; the
+   * heavier one keeps its line and its claim.
+   *
+   * What it costs is the interesting part. Two animals that know each other
+   * have settled this before and settle it again for almost nothing, while
+   * strangers have to work it out from scratch every time. That is why a
+   * newly mixed herd is a tired herd.
+   *
+   * @returns {{ winner, loser, source } | null} null when they weren't rivals
+   * @private
+   */
+  contest(mover, blocker) {
+    if (!mover.squaresUp || !blocker.squaresUp) return null;
+    const source = this.contestedSource(mover, blocker);
+    if (!source) return null;
+
+    const [winner, loser] = mover.strength >= blocker.strength
+      ? [mover, blocker]
+      : [blocker, mover];
+    const known = loser.familiarity(winner);
+    loser.giveWay(loser.constructor.strain * (1 - 0.75 * known));
+    winner.afterContest();
+    loser.afterContest();
+    return { winner, loser, source };
+  }
+
   /**
    * If `mover` is courting and has reached a willing partner, they mate and
    * the female takes. Called after the step, so animals pair where they
@@ -197,10 +260,16 @@ export default class Farm {
     for (const mother of this.animals) {
       if (!mother.isAlive() || !mother.readyToBirth()) continue;
       const baby = mother.newborn();
-      const spot = this.freeSpotFor(baby);
+      // Beside its mother if there is room there, and only failing that
+      // wherever the field has a gap.
+      const spot = this.freeSpotNear(mother, baby) ?? this.freeSpotFor(baby);
       if (!spot) continue; // no room in the field; the birth waits
       baby.name = this.unusedName(baby.name);
       baby.moveTo(spot);
+      // The two of them know each other from the first step, without having
+      // had to stand together to learn it.
+      baby.bondTo(mother);
+      mother.bondTo(baby);
       mother.delivered();
       born.push(baby);
     }
@@ -243,7 +312,18 @@ export default class Farm {
    * other animal's personal space reaches it.
    */
   isClear(point, mover) {
-    return inBounds(point) && this.animals.every((a) => a === mover || !mover.wouldCrowd(point, a));
+    return inBounds(point) && this.blockerAt(point, mover) === null;
+  }
+
+  /**
+   * Whose personal space is in the way at `point`, or null if the ground is
+   * free. The fence is not an animal, so a point outside the field blocks
+   * without anyone standing there — which is the difference between being
+   * hemmed in by the herd and being hemmed in by the world.
+   * @returns {import("./Animal.js").default | null}
+   */
+  blockerAt(point, mover) {
+    return this.animals.find((a) => a !== mover && mover.wouldCrowd(point, a)) ?? null;
   }
 
   /**
@@ -263,6 +343,30 @@ export default class Farm {
   }
 
   /**
+   * A spot with room for `animal` as near to `beside` as the two of them are
+   * allowed to stand, trying further out only as the closer ground turns out
+   * to be taken. A newborn ends up at its mother's flank, not merely in her
+   * quarter of the field — which matters, because two animals at their
+   * minimum separation are exactly close enough to count as company.
+   * @returns {{ x: number, y: number } | null} null when the ground around
+   *   `beside` is all taken; the caller falls back to the whole field.
+   */
+  freeSpotNear(beside, animal, attempts = 60) {
+    const closest = animal.radius + beside.radius;
+    const reach = animal.radius * 3;
+    for (let i = 0; i < attempts; i++) {
+      const angle = randomAngle();
+      const away = closest + (i / attempts) * reach;
+      const spot = clampToPasture({
+        x: beside.x + Math.cos(angle) * away,
+        y: beside.y + Math.sin(angle) * away,
+      });
+      if (this.isClear(spot, animal)) return spot;
+    }
+    return null;
+  }
+
+  /**
    * Live one animal for one step: it feels, it may reconsider, and then it
    * acts on whatever it decided.
    *
@@ -275,9 +379,10 @@ export default class Farm {
    * @returns {"moved" | "resting" | "blocked"}
    * @private
    */
-  stepOne(mover) {
+  stepOne(mover, contests = []) {
     const context = { neighbors: this.animals.filter((a) => a !== mover), farm: this };
     mover.think(context);
+    mover.keepCompany(context.neighbors);
 
     // Some goals are pursued by staying put; that isn't being stuck.
     if (mover.isStill()) return "resting";
@@ -295,6 +400,12 @@ export default class Farm {
         return "moved";
       }
     }
+    // Hemmed in. If it was another animal directly in the way, and the two of
+    // them are after the same trough, that is a contest and not mere traffic.
+    const blocker = this.blockerAt(mover.positionAfter(facing), mover);
+    const settled = blocker && this.contest(mover, blocker);
+    if (settled) contests.push(settled);
+
     mover.balk();
     this.courtship(mover); // a pair that met and stopped is still a pair
     return "blocked";
@@ -308,8 +419,11 @@ export default class Farm {
    */
   step(id) {
     const mover = this.find(id);
-    if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null, died: [] };
-    const outcome = this.stepOne(mover);
+    if (!mover) {
+      return { farm: this, moved: false, outcome: "missing", intention: null, died: [], contests: [] };
+    }
+    const contests = [];
+    const outcome = this.stepOne(mover, contests);
     const born = this.deliver();
     return {
       farm: this.settled(born),
@@ -318,6 +432,7 @@ export default class Farm {
       intention: { ...mover.intention },
       died: mover.isAlive() ? [] : [mover],
       born,
+      contests,
     };
   }
 
@@ -329,8 +444,9 @@ export default class Farm {
    */
   stepAll() {
     let moved = 0;
+    const contests = [];
     for (const animal of this.animals) {
-      if (this.stepOne(animal) === "moved") moved += 1;
+      if (this.stepOne(animal, contests) === "moved") moved += 1;
     }
     const born = this.deliver();
     return {
@@ -339,6 +455,7 @@ export default class Farm {
       born,
       died: this.animals.filter((a) => !a.isAlive()),
       dried: this.resources.filter((r) => r.depleted),
+      contests,
     };
   }
 
