@@ -71,6 +71,22 @@ npm run build      # it still compiles
 
 Run `npm run check` too if you touched anything that could reach the model.
 
+Then run these, and **paste the raw output into your report**:
+
+```sh
+git status --short
+git diff --stat
+```
+
+If a file outside `src/FarmModel.jsx`, `src/main.css` and `scripts/ui-check.py`
+appears in that list, you have gone outside your remit. Stop and say so plainly
+instead of reporting success — a report that claims one thing while the diff
+says another is worse than no report, because it costs whoever reads it the
+time to discover the change *and* the trust to check the rest. This has already
+happened once: an agent rewrote the movement model, deleted the rule that stops
+animals sidestepping, and reported "no model file was touched" alongside a
+passing `npm run check` that had in fact logged 28,074 violations.
+
 If your change makes a new claim about the page — a control that must stay
 reachable, a colour that must survive — add a check to `scripts/ui-check.py`
 saying so. A visual change nobody can verify twice is a visual change that comes
