@@ -118,9 +118,22 @@ def check_place_water(page):
 
     page.get_by_role("button", name="💧 water").click()
     box = page.locator(".fa-pasture").bounding_box()
-    page.locator(".fa-pasture").click(
-        position={"x": box["width"] * 0.25, "y": box["height"] * 0.40}
+    at = {"x": box["width"] * 0.25, "y": box["height"] * 0.40}
+
+    # Two things a miss could be, neither of which the old message could tell
+    # apart: the field changed size around the click, so the fraction clicked is
+    # not the fraction measured; or something else was on top of the point and
+    # took the event. This missed once by nine points and left no way to know.
+    under = page.evaluate(
+        """([x, y, left, top]) => {
+             const el = document.elementFromPoint(left + x, top + y);
+             if (!el) return "(nothing)";
+             return el.className?.baseVal ?? el.className ?? el.tagName;
+           }""",
+        [at["x"], at["y"], box["x"], box["y"]],
     )
+    page.locator(".fa-pasture").click(position=at)
+    after = page.locator(".fa-pasture").bounding_box()
 
     blobs = page.eval_on_selector_all(
         ".fa-water",
@@ -132,7 +145,14 @@ def check_place_water(page):
         placed = blobs[-1]
         off = max(abs(placed["x"] - 25), abs(placed["y"] - 40))
         if off > 2:
-            fail(f"water landed at {placed['x']:.0f},{placed['y']:.0f}% — clicked 25,40%")
+            shifted = (abs(after["width"] - box["width"]) > 0.5
+                       or abs(after["height"] - box["height"]) > 0.5)
+            fail(f"water landed at {placed['x']:.1f},{placed['y']:.1f}% — clicked 25,40% "
+                 f"({at['x']:.0f},{at['y']:.0f}px into a "
+                 f"{box['width']:.0f}x{box['height']:.0f} field). "
+                 f"Under the point: {under}. "
+                 + (f"The field resized to {after['width']:.0f}x{after['height']:.0f} "
+                    f"around the click." if shifted else "The field did not resize."))
         else:
             note(f"Water landed at {placed['x']:.0f},{placed['y']:.0f}% for a click at 25,40%.")
 
@@ -175,7 +195,13 @@ def check_place_by_keyboard(page):
         page.keyboard.press(key)
     aimed = aim.evaluate(spot)
     # Two right and one up, unless the fence stopped it short of a full nudge.
-    if not (start[0] < aimed[0] <= start[0] + 10 and start[1] - 5 <= aimed[1] < start[1]):
+    # The bounds are inclusive of exactly one nudge, and a full nudge is what
+    # normally happens — so they have to be compared with a tolerance. Without
+    # one this fails outright whenever the subtraction rounds the wrong way:
+    # 34.4286 - 5 is 29.428600000000003, which is not <= 29.4286.
+    EPS = 1e-9
+    if not (start[0] < aimed[0] <= start[0] + 10 + EPS
+            and start[1] - 5 - EPS <= aimed[1] < start[1]):
         fail(f"arrow keys moved the drop point {start} → {aimed}, not right and up")
 
     page.keyboard.press("Enter")
@@ -256,8 +282,17 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        # Only this app's own failures count. The stylesheet pulls fonts from
+        # Google, and that CDN 404s often enough to fail roughly one run in ten
+        # — which says nothing about the farm and made the check untrustworthy.
+        # The console's own text for it is "Failed to load resource", naming
+        # nothing, so the response is what has to be watched.
+        host = args.url.split("//", 1)[-1].rstrip("/")
+        page.on("console", lambda m: errors.append(m.text)
+                if m.type == "error" and "Failed to load resource" not in m.text else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("response", lambda r: errors.append(f"HTTP {r.status} {r.url}")
+                if r.status >= 400 and host in r.url else None)
 
         page.goto(args.url)
         page.wait_for_load_state("networkidle")
