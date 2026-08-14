@@ -2,7 +2,8 @@
 
 `npm run check` proves the model's rules — overlaps, the fence, stride length.
 None of that says the page draws what the model holds, so this walks the UI:
-boots it, selects an animal, adds one, puts down water, and lets them roam.
+boots it, selects an animal, adds one, puts down water by mouse and grass by
+keyboard, and lets them roam.
 
 Expects the dev server already running; `npm run ui-check` starts one first.
 """
@@ -138,6 +139,69 @@ def check_place_water(page):
     if page.locator(".fa-yield").first.inner_text() == stock_before:
         fail("stock line did not change after putting water down")
 
+    # The keyboard's aim marker is furniture the mouse never asked for: armed by
+    # click, the field should look exactly as it always did.
+    page.get_by_role("button", name="💧 water").click()
+    aim = page.locator(".fa-aim")
+    if aim.count() and aim.evaluate("el => getComputedStyle(el).opacity") != "0":
+        fail("the keyboard aim marker is showing for a mouse-armed placement")
+    page.get_by_role("button", name="💧 water").click()
+
+
+def check_place_by_keyboard(page):
+    """Water and grass go down without a pointer — WCAG 2.1.1, and it must stay.
+
+    Arms grass from the keyboard, then asks for the three things that make the
+    capability real: the field takes focus, something visible says where the
+    drop point is, and the arrows move it there before Enter lands it.
+    """
+    before = len(page.locator(".fa-grass").all())
+    page.get_by_role("button", name="🌿 grass").focus()
+    page.keyboard.press("Enter")
+
+    if not page.eval_on_selector(".fa-pasture", "el => el === document.activeElement"):
+        fail("arming grass from the keyboard left focus outside the pasture — "
+             "nothing there can hear an arrow key")
+        return
+
+    aim = page.locator(".fa-aim")
+    if aim.count() == 0 or aim.evaluate("el => getComputedStyle(el).opacity") == "0":
+        fail("nothing on the field marks where the keys would drop the grass")
+        return
+
+    spot = "el => [parseFloat(el.style.left), parseFloat(el.style.top)]"
+    start = aim.evaluate(spot)
+    for key in ("ArrowRight", "ArrowRight", "ArrowUp"):
+        page.keyboard.press(key)
+    aimed = aim.evaluate(spot)
+    # Two right and one up, unless the fence stopped it short of a full nudge.
+    if not (start[0] < aimed[0] <= start[0] + 10 and start[1] - 5 <= aimed[1] < start[1]):
+        fail(f"arrow keys moved the drop point {start} → {aimed}, not right and up")
+
+    page.keyboard.press("Enter")
+    blobs = page.eval_on_selector_all(
+        ".fa-grass",
+        "els => els.map(el => ({ x: parseFloat(el.style.left), y: parseFloat(el.style.top) }))",
+    )
+    if len(blobs) != before + 1:
+        fail(f"Enter should have put grass down; the field has {len(blobs)}, not {before + 1}")
+        return
+
+    placed = blobs[-1]
+    off = max(abs(placed["x"] - aimed[0]), abs(placed["y"] - aimed[1]))
+    if off > 0.5:
+        fail(f"grass landed at {placed['x']:.0f},{placed['y']:.0f}% — "
+             f"aimed at {aimed[0]:.0f},{aimed[1]:.0f}%")
+
+    # The pasture stops being a tab stop the moment it lands, so focus has to go
+    # somewhere deliberate or the keyboard farmer is back at the top of the page.
+    landed_on = page.evaluate("() => document.activeElement.textContent.trim()")
+    if "grass" not in landed_on:
+        fail(f"after dropping, focus went to {landed_on!r} instead of back to the grass button")
+
+    note(f"Keyboard put grass down at {placed['x']:.0f},{placed['y']:.0f}% "
+         f"(aimed from the herd at {start[0]:.0f},{start[1]:.0f}%).")
+
 
 def check_resource_colour(page):
     """A pond should not be drawn in the colour of the source-code panel.
@@ -199,6 +263,7 @@ def main():
         check_selection(page)
         check_add(page)
         check_place_water(page)
+        check_place_by_keyboard(page)
         check_resource_colour(page)
         check_roaming(page)
 

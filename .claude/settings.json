@@ -1,21 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/_git/ai/_animal-farm/**)",
-      "Read(//c/_git/ai/**)",
-      "PowerShell(Get-ChildItem -Force c:\\\\_git\\\\ai\\\\_animal-farm | Select-Object Mode,Length,Name | Format-Table -AutoSize | Out-String -Width 200; Write-Output \"---- node_modules size ----\"; \"{0:N1} MB\" -f \\(\\(Get-ChildItem -Recurse -Force c:\\\\_git\\\\ai\\\\_animal-farm\\\\node_modules -ErrorAction SilentlyContinue | Measure-Object Length -Sum\\).Sum/1MB\\); Write-Output \"---- .claude in dest ----\"; Get-ChildItem -Force -Recurse c:\\\\_git\\\\ai\\\\animal_farm\\\\.claude | Select-Object FullName | Out-String -Width 200)",
-      "Read(//c/_git/ai/_animal-farm/.claude/**)",
-      "PowerShell($r = robocopy \"c:\\\\_git\\\\ai\\\\_animal-farm\" \"c:\\\\_git\\\\ai\\\\animal_farm\" /E /XD node_modules dist /NFL /NDL /NJH /NP; $r | Out-String; Write-Output \"robocopy exit: $LASTEXITCODE\"; if \\($LASTEXITCODE -lt 8\\) { Write-Output \"OK\" } else { Write-Output \"FAILED\" })",
-      "PowerShell(git -C c:\\\\_git\\\\ai\\\\animal_farm status -sb)",
-      "PowerShell(git -C c:\\\\_git\\\\ai\\\\animal_farm remote -v)",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; Write-Output \"=== key in HEAD's settings.json? ===\"; git show HEAD:.claude/settings.json 2>$null | Select-String -Pattern 'sk-ant|sk-or-v1' | ForEach-Object { $_.Line.Trim\\(\\).Substring\\(0,[Math]::Min\\(120,$_.Line.Trim\\(\\).Length\\)\\) }; Write-Output \"=== commits whose content ever contained a key ===\"; git log --oneline -S'sk-ant-api03' --all; git log --oneline -S'sk-or-v1' --all; Write-Output \"=== total commits ===\"; git rev-list --count HEAD)",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $j = Get-Content .claude\\\\settings.json -Raw | ConvertFrom-Json; Write-Output \"count: $\\($j.permissions.allow.Count\\)\"; $local = \\(Get-Content .claude\\\\settings.local.json -Raw | ConvertFrom-Json\\).permissions.allow; Write-Output \"--- entries in settings.json NOT in local ---\"; $j.permissions.allow | Where-Object { $local -notcontains $_ } | ForEach-Object { if \\($_.Length -gt 100\\) { $_.Substring\\(0,100\\) + ' …' } else { $_ } })",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; Select-String -Path .claude\\\\settings.local.json -Pattern 'sk-ant-api|sk-or-v1-' | ForEach-Object { \"line $\\($_.LineNumber\\): \" + $_.Line.Trim\\(\\).Substring\\(0, [Math]::Min\\(160, $_.Line.Trim\\(\\).Length\\)\\) })",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $env:ANTHROPIC_API_KEY = \"sk-ant-dummy-not-a-real-key\"; $env:RATE_LIMIT_PER_MINUTE = \"5\"; $p = Start-Process node -ArgumentList \"server/decide.js\" -PassThru -NoNewWindow -RedirectStandardOutput \"$env:TEMP\\\\proxy.out\" -RedirectStandardError \"$env:TEMP\\\\proxy.err\"; Start-Sleep -Milliseconds 800; node \"C:\\\\Users\\\\Ran\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c---git-ai-animal-farm\\\\66caeb32-fe76-40a1-8397-f59cec10b20e\\\\scratchpad\\\\smoke.mjs\"; Write-Output \"--- proxy stdout ---\"; Get-Content \"$env:TEMP\\\\proxy.out\"; Write-Output \"--- proxy stderr ---\"; Get-Content \"$env:TEMP\\\\proxy.err\"; Stop-Process -Id $p.Id -Force)",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $env:ANTHROPIC_API_KEY = \"sk-ant-dummy-not-a-real-key\"; $env:RATE_LIMIT_PER_MINUTE = \"60\"; $p = Start-Process node -ArgumentList \"server/decide.js\" -PassThru -NoNewWindow -RedirectStandardOutput \"$env:TEMP\\\\proxy2.out\" -RedirectStandardError \"$env:TEMP\\\\proxy2.err\"; Start-Sleep -Milliseconds 800; node \"C:\\\\Users\\\\Ran\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c---git-ai-animal-farm\\\\66caeb32-fe76-40a1-8397-f59cec10b20e\\\\scratchpad\\\\smoke.mjs\"; Write-Output \"--- proxy stderr ---\"; Get-Content \"$env:TEMP\\\\proxy2.err\"; Stop-Process -Id $p.Id -Force)",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $env:ANTHROPIC_API_KEY = \"sk-ant-dummy-not-a-real-key\"; $p = Start-Process node -ArgumentList \"server/decide.js\" -PassThru -NoNewWindow -RedirectStandardOutput \"$env:TEMP\\\\proxy3.out\" -RedirectStandardError \"$env:TEMP\\\\proxy3.err\"; Start-Sleep -Milliseconds 800; node -e \"fetch\\('http://127.0.0.1:8787/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify\\({options:[{goal:'graze',affinity:0.8,pressure:0.9}],self:{goal:'roam',drives:{hunger:0.9}}}\\)}\\).then\\(async r=>console.log\\(r.status, await r.text\\(\\)\\)\\)\"; Write-Output \"--- what the proxy logged ---\"; Get-Content \"$env:TEMP\\\\proxy3.err\"; Stop-Process -Id $p.Id -Force)",
-      "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; Write-Output \"user.name : $\\(git config user.name\\)\"; Write-Output \"user.email: $\\(git config user.email\\)\"; Write-Output \"branch    : $\\(git rev-parse --abbrev-ref HEAD\\)\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git commit *)",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff src/model/)",
+      "Edit(/.claude/skills/extending-the-farm/**)"
     ]
   }
 }

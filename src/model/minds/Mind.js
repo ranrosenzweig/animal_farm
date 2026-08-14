@@ -13,7 +13,7 @@
  * @typedef {{
  *   self: { name: string, species: string, goal: string, drives: Record<string, number> },
  *   options: { goal: string, affinity: number, pressure: number }[],
- *   nearby: { name: string, species: string, distance: number }[],
+ *   nearby: { name: string, species: string, distance: number, familiarity: number }[],
  * }} Percept
  *
  * @typedef {{ goal: string, reason: string }} Intention
