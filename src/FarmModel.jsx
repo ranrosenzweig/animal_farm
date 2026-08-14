@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
-import { MUD } from "./model/pasture.js";
+import { MUD, centroid, clampToPasture } from "./model/pasture.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { sourceOf } from "./sources.js";
 
@@ -15,12 +15,81 @@ const SEX_MARKS = { female: "♀", male: "♂" };
 const RESOURCE_ICONS = { water: "💧", grass: "🌿" };
 
 /**
+ * The field is drawn as ground tilting away from the viewer. Depth is the
+ * model's own y: the far edge of the field is narrower than the near one, and
+ * an animal standing back there is drawn smaller and hazier.
+ *
+ * This is presentation only — src/model still deals in a flat 100×100 field
+ * and knows nothing about a camera. One projection is applied on the way to
+ * the screen, and undone on the way back when the farmer clicks.
+ *
+ * Depth is linear rather than the reciprocal a real lens gives. A lens would
+ * crowd the far rows together, but it would also make unproject() a division
+ * by something that goes to zero at the horizon; linear stays honestly
+ * invertible, and the width and size cues carry the depth on their own.
+ */
+const HORIZON = 12;
+/** Width of the far edge of the field, as a fraction of the near edge. */
+const FAR_WIDTH = 0.78;
+/** Size of a sprite standing at the far edge, as a fraction of one at the near edge. */
+const FAR_SCALE = 0.6;
+
+/** 0 at the horizon, 1 at the near edge. */
+const depthAt = (y) => (y - HORIZON) / (100 - HORIZON);
+
+/** How much of the field's full width is left at depth `y`. */
+const widthAt = (y) => FAR_WIDTH + (1 - FAR_WIDTH) * depthAt(y);
+
+/** How big something standing or lying at depth `y` is drawn. */
+const sizeAt = (y) => FAR_SCALE + (1 - FAR_SCALE) * depthAt(y);
+
+/** A spot on the ground, as the screen has it. */
+const project = ({ x, y }) => ({ x: 50 + (x - 50) * widthAt(y), y });
+
+/** A spot on the screen, as the ground has it. The exact inverse of project. */
+const unproject = ({ x, y }) => ({ x: 50 + (x - 50) / widthAt(y), y });
+
+/**
+ * Everything the screen needs to stand something on the ground at `spot`:
+ * where it goes, how big it is there, how much the distance washes it out,
+ * and who it is in front of.
+ */
+function standing(spot) {
+  return {
+    left: `${project(spot).x}%`,
+    top: `${spot.y}%`,
+    "--depth-scale": sizeAt(spot.y),
+    "--haze": 0.7 + 0.3 * depthAt(spot.y),
+    // Nearer animals occlude further ones. The fence sits above the lot.
+    zIndex: Math.round(spot.y * 10),
+  };
+}
+
+/** The trapezoid the ground fills, in the ground layer's own box. */
+const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
+  `${project({ x: 100, y: HORIZON }).x}% 0, 100% 100%, 0 100%)`;
+
+/**
  * How long one step takes. The sprite's CSS transition is driven from this
  * same number, so an animal is still gliding into its last spot exactly as
  * the next step is decided — the walk looks continuous instead of a dart
  * followed by a wait.
  */
 const STEP_MS = 600;
+
+/**
+ * How far one arrow key slides the drop point, in pasture percent. Big enough
+ * to cross the field in a dozen presses, small enough to drop a trough beside
+ * one animal rather than on top of the herd.
+ */
+const NUDGE = 5;
+
+const NUDGE_KEYS = {
+  ArrowUp: { x: 0, y: -NUDGE },
+  ArrowDown: { x: 0, y: NUDGE },
+  ArrowLeft: { x: -NUDGE, y: 0 },
+  ArrowRight: { x: NUDGE, y: 0 },
+};
 
 /** Calm when a drive is low, urgent when it is high. Condition passes 1 - health. */
 function driveColor(level) {
@@ -44,6 +113,8 @@ export default function FarmModel() {
   const [roaming, setRoaming] = useState(false);
   /** Which kind of resource the next pasture click puts down, if any. */
   const [placing, setPlacing] = useState(null);
+  /** Where the keys would drop it, in pasture percent. Null when nothing is armed. */
+  const [dropAt, setDropAt] = useState(null);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const census = farm.census();
@@ -57,6 +128,16 @@ export default function FarmModel() {
   // updaters twice under StrictMode, which would step everyone twice a tick.
   const farmRef = useRef(farm);
   farmRef.current = farm;
+
+  // The pasture is only a tab stop while something is armed, so there is no
+  // dead stop in the ordinary tab order; focus is handed to it the moment the
+  // farmer picks up a bucket, and handed back when they put it down.
+  const pastureRef = useRef(null);
+  const armedFrom = useRef(null);
+
+  useEffect(() => {
+    if (placing) pastureRef.current?.focus();
+  }, [placing]);
 
   useEffect(() => {
     if (!roaming) return undefined;
@@ -101,17 +182,64 @@ export default function FarmModel() {
     for (const lost of died) pushLog(lost.epitaph(), "died");
   }
 
-  /** Put water or grass wherever the farmer clicked. */
-  function placeAt(event) {
-    if (!placing) return;
-    const box = event.currentTarget.getBoundingClientRect();
-    const { farm: next, resource } = farm.addResource(placing, {
-      x: ((event.clientX - box.left) / box.width) * 100,
-      y: ((event.clientY - box.top) / box.height) * 100,
-    });
+  /**
+   * Pick up a bucket. The drop point starts in the middle of the herd, because
+   * that is where feed and water are wanted and it costs no keypresses to get
+   * there; the arrows are for the last few percent.
+   */
+  function arm(kind, button) {
+    if (placing === kind) return cancelPlacing();
+    armedFrom.current = button;
+    setDropAt(clampToPasture(centroid(farm.animals) ?? { x: 50, y: 50 }));
+    setPlacing(kind);
+  }
+
+  function cancelPlacing() {
+    setPlacing(null);
+    armedFrom.current?.focus();
+  }
+
+  /** Put water or grass down at a spot in pasture percent. */
+  function place(at) {
+    const { farm: next, resource } = farm.addResource(placing, at);
     setFarm(next);
     setPlacing(null);
     pushLog(`${resource.name} put down — ${Math.round(resource.volume)} ${resource.unit}.`, placing);
+    // The pasture stops being a tab stop the instant this lands, so send focus
+    // back to the button that armed it rather than dropping it on the body.
+    armedFrom.current?.focus();
+  }
+
+  /** Put water or grass wherever the farmer clicked. */
+  function placeAt(event) {
+    if (!placing) return;
+    // Enter on a sprite raises a click with no coordinates, which used to land
+    // the resource in the corner of the fence. The keys have their own path.
+    if (event.detail === 0) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    // The click lands on the tilted ground, so read it back off the projection
+    // — otherwise a trough dropped at the far edge would slide toward the
+    // middle of the field on its way to being drawn.
+    place(unproject({
+      x: ((event.clientX - box.left) / box.width) * 100,
+      y: ((event.clientY - box.top) / box.height) * 100,
+    }));
+  }
+
+  /** The same capability without a pointer: arrows steer, Enter drops, Esc puts it back. */
+  function steer(event) {
+    if (!placing) return;
+    if (event.key === "Escape") return cancelPlacing();
+    const nudge = NUDGE_KEYS[event.key];
+    if (nudge) {
+      event.preventDefault();
+      setDropAt((at) => clampToPasture({ x: at.x + nudge.x, y: at.y + nudge.y }));
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      place(dropAt);
+    }
   }
 
   function addAnimal() {
@@ -215,27 +343,61 @@ export default function FarmModel() {
 
         .fa-pasture {
           position: relative;
-          flex: 1.3;
+          /* Wider than it used to be: a field that recedes needs room across
+             the near edge, or the taper reads as a runway. */
+          flex: 1.6;
           min-height: 360px;
           border-radius: 10px;
           overflow: hidden;
-          background:
-            linear-gradient(180deg, var(--sky) 0%, var(--sky-2) 26%, var(--field-1) 30%, var(--field-2) 100%);
+          /* Sky only. The field is a separate, tapered plane laid over it. */
+          background: linear-gradient(180deg, var(--sky) 0%, var(--sky-2) 100%);
           border: 3px solid var(--wood-dark);
         }
+        /* Low hills, so the field ends against something instead of stopping. */
+        .fa-hills {
+          position: absolute;
+          left: 0; right: 0; top: 0;
+          height: ${HORIZON}%;
+          background:
+            radial-gradient(30% 62% at 20% 108%, #a9bda0 0 72%, transparent 74%),
+            radial-gradient(22% 44% at 44% 108%, #b6c7ac 0 72%, transparent 74%),
+            radial-gradient(34% 70% at 74% 108%, #9fb597 0 72%, transparent 74%);
+        }
+        /* The ground, seen from a standing farmer's height. Its furrows are
+           evenly spaced because the projection is linear in depth; the taper
+           and the haze at the far edge are what read as distance. */
+        .fa-ground {
+          position: absolute;
+          left: 0; right: 0; bottom: 0;
+          top: ${HORIZON}%;
+          clip-path: ${GROUND_CLIP};
+          background:
+            linear-gradient(180deg, rgba(223,233,218,0.55) 0%, transparent 18%),
+            repeating-linear-gradient(180deg, rgba(255,255,255,0.06) 0 1px, transparent 1px 6.5%),
+            linear-gradient(180deg, #7d9c5c 0%, var(--field-1) 30%, var(--field-2) 100%);
+        }
+        /* Two rails and a run of posts, drawn at foreground size. It sits above
+           every sprite, so an animal at the front of the field passes behind
+           it — which is most of what tells you the field has a front. */
         .fa-fence {
           position: absolute;
           left: 0; right: 0; bottom: 0;
-          height: 26px;
-          background: repeating-linear-gradient(90deg, var(--wood) 0 6px, transparent 6px 22px);
-          opacity: 0.55;
+          height: 42px;
+          z-index: 1200;
+          background:
+            repeating-linear-gradient(90deg, var(--wood) 0 7px, transparent 7px 36px),
+            linear-gradient(180deg,
+              transparent 0 9px, var(--wood) 9px 14px,
+              transparent 14px 26px, var(--wood) 26px 31px, transparent 31px);
+          opacity: 0.8;
         }
         .fa-barn {
           position: absolute;
-          right: 18px; top: 10px;
-          font-size: 34px;
-          opacity: 0.85;
-          filter: drop-shadow(0 2px 2px rgba(0,0,0,0.25));
+          /* Stands on its own ground spot: the origin is its base, not middle. */
+          transform: translate(-50%, -100%) scale(var(--depth-scale, 1));
+          transform-origin: 50% 100%;
+          font-size: 46px;
+          filter: drop-shadow(0 3px 3px rgba(0,0,0,0.25)) saturate(var(--haze, 1));
         }
 
         .fa-sprite {
@@ -257,12 +419,32 @@ export default function FarmModel() {
             top var(--step-duration, 600ms) linear;
         }
         @media (prefers-reduced-motion: reduce) {
-          .fa-sprite { transition: none; animation: none; }
+          .fa-sprite, .fa-sprite .emoji { transition: none; animation: none; }
         }
+        /* Only the animal takes the depth, not its name tag: a tag scaled down
+           to the far edge would be 6px of text nobody could read. */
         .fa-sprite .emoji {
           position: relative;
           font-size: 30px;
-          filter: drop-shadow(0 3px 2px rgba(0,0,0,0.3));
+          filter: drop-shadow(0 2px 1px rgba(0,0,0,0.22)) saturate(var(--haze, 1));
+          transform: scale(var(--depth-scale, 1));
+          /* Its feet are what stand on the ground, so scale from there. */
+          transform-origin: 50% 100%;
+          transition: transform var(--step-duration, 600ms) linear;
+        }
+        /* The patch of shade an animal stands in. Painted behind the emoji
+           itself — a negative z-index child draws under its parent's text. */
+        .fa-sprite .shade {
+          position: absolute;
+          left: 50%;
+          bottom: 2px;
+          transform: translateX(-50%);
+          width: 30px;
+          height: 9px;
+          border-radius: 50%;
+          background: radial-gradient(closest-side, rgba(30,42,18,0.55), rgba(30,42,18,0.05));
+          filter: blur(1.5px);
+          z-index: -1;
         }
         /* An expecting female is marked twice: a badge on the animal itself,
            and a coloured name tag, so she is findable without hunting. */
@@ -281,7 +463,7 @@ export default function FarmModel() {
           font-weight: 600;
         }
         .fa-sprite.selected .emoji {
-          transform: scale(1.18);
+          transform: scale(calc(var(--depth-scale, 1) * 1.18));
         }
         .fa-sprite .tag {
           margin-top: 2px;
@@ -320,26 +502,70 @@ export default function FarmModel() {
           transform: translate(-50%, -50%);
           border-radius: 50%;
           pointer-events: none;
+          /* A pond is round where it lies; from here it is an ellipse. The
+             ratio is taken off the rendered width rather than set in percent,
+             because a percentage height is measured against the pasture's
+             height — which is how these came out as beach balls. */
+          aspect-ratio: 3 / 1;
         }
         .fa-source {
           /* size and opacity come from how much is left, so a drained source
              visibly shrinks and fades before it disappears */
-          transition: width 0.4s linear, height 0.4s linear, opacity 0.4s linear;
+          transition: width 0.4s linear, opacity 0.4s linear;
         }
+        /* All three lie flat on the ground, so they get the same squash as the
+           field and a lip of shadow where they meet it. */
+        /* Lit from above and behind, so the near lip catches the light and the
+           far one sits in the bank's shadow. */
         .fa-water {
-          background: radial-gradient(ellipse at 40% 35%, #7fb4d6, #3E7CA6);
-          box-shadow: inset 0 -3px 6px rgba(0,0,0,0.2);
+          background: radial-gradient(ellipse at 50% 78%, #8fc3e2 0%, #5896c2 55%, #3E7CA6 100%);
+          box-shadow: inset 0 3px 5px rgba(20,45,65,0.45), 0 2px 3px rgba(38,48,26,0.3);
         }
         .fa-grass {
-          background: radial-gradient(ellipse at 45% 40%, #8cbf5f, #4d7a2e);
+          background: radial-gradient(ellipse at 50% 75%, #9ccb6c 0%, #6b9b41 55%, #4d7a2e 100%);
+          box-shadow: inset 0 3px 5px rgba(30,50,20,0.35), 0 2px 3px rgba(38,48,26,0.28);
         }
         .fa-mud {
-          width: 19%; height: 13%;
-          background: radial-gradient(ellipse at 45% 40%, #7a5b3f, #4a3421);
-          opacity: 0.7;
+          background: radial-gradient(ellipse at 50% 75%, #856544 0%, #5e442c 60%, #4a3421 100%);
+          box-shadow: inset 0 3px 6px rgba(0,0,0,0.4);
+          opacity: 0.75;
         }
         .fa-pasture.placing { cursor: crosshair; }
         .fa-pasture.placing .fa-sprite { cursor: crosshair; }
+        /* Barn red, not cream: the ring sits against the pale sky at the top of
+           the field, where cream would vanish. */
+        .fa-pasture:focus-visible {
+          outline: 3px solid var(--barn-red);
+          outline-offset: 2px;
+        }
+        /* Where the keys would drop it. A pointer already says where it is
+           aiming, so the marker only appears for a keyboard-driven focus. */
+        .fa-aim {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          border: 2px dashed var(--cream);
+          background: rgba(246,239,221,0.25);
+          /* Over every animal, under the fence: it has to stay findable even
+             when the drop point is behind the herd. */
+          z-index: 1100;
+          box-shadow: 0 0 0 2px rgba(46,42,31,0.35);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 15px;
+          pointer-events: none;
+          opacity: 0;
+          transition: left 120ms ease-out, top 120ms ease-out;
+        }
+        .fa-pasture:focus-visible .fa-aim { opacity: 1; }
+        /* Its own block, not the one up by .fa-sprite: an override that came
+           earlier in the sheet would lose the tie to the rule above. */
+        @media (prefers-reduced-motion: reduce) {
+          .fa-aim { transition: none; }
+        }
         .fa-empty {
           position: absolute;
           inset: 0;
@@ -568,19 +794,39 @@ export default function FarmModel() {
       </div>
 
       <div className="fa-body">
-        <div className={"fa-pasture" + (placing ? " placing" : "")} onClick={placeAt}>
-          <div className="fa-barn">🏚️</div>
-          <div className="fa-feature fa-mud" style={{ left: `${MUD.x}%`, top: `${MUD.y}%` }} />
+        <div
+          ref={pastureRef}
+          className={"fa-pasture" + (placing ? " placing" : "")}
+          onClick={placeAt}
+          onKeyDown={steer}
+          // Only reachable, and only an application, while a bucket is in hand:
+          // otherwise the arrow keys belong to the reader, not to us.
+          tabIndex={placing ? 0 : undefined}
+          role={placing ? "application" : undefined}
+          aria-label={placing
+            ? `Pasture — arrow keys to aim the ${placing}, Enter to put it down, Escape to cancel`
+            : undefined}
+        >
+          <div className="fa-hills" aria-hidden="true" />
+          <div className="fa-ground" aria-hidden="true" />
+          <div className="fa-barn" style={standing({ x: 84, y: 18 })}>🏚️</div>
+          <div
+            className="fa-feature fa-mud"
+            style={{
+              left: `${project(MUD).x}%`,
+              top: `${MUD.y}%`,
+              width: `${19 * sizeAt(MUD.y)}%`,
+            }}
+          />
           {farm.resources.map((source) => (
             <div
               key={source.id}
               className={`fa-feature fa-source fa-${source.kind}`}
               title={source.describe()}
               style={{
-                left: `${source.x}%`,
+                left: `${project(source).x}%`,
                 top: `${source.y}%`,
-                width: `${source.radius * 2}%`,
-                height: `${source.radius * 1.45}%`,
+                width: `${source.radius * 2 * sizeAt(source.y)}%`,
                 opacity: 0.45 + source.fullness * 0.45,
               }}
             />
@@ -589,7 +835,7 @@ export default function FarmModel() {
             <button
               key={a.id}
               className={"fa-sprite" + (a.id === selected?.id ? " selected" : "")}
-              style={{ left: `${a.x}%`, top: `${a.y}%` }}
+              style={standing(a)}
               onClick={(event) => {
                 // While placing, let the click through to the pasture beneath.
                 if (placing) return;
@@ -606,6 +852,7 @@ export default function FarmModel() {
               )}
               {/* Newborns are visibly smaller until they grow up. */}
               <span className="emoji" style={a.isAdult ? undefined : { fontSize: "18px" }}>
+                <span className="shade" aria-hidden="true" />
                 {a.emoji}
                 {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
@@ -614,6 +861,15 @@ export default function FarmModel() {
               </span>
             </button>
           ))}
+          {placing && dropAt && (
+            <div
+              className="fa-aim"
+              style={{ left: `${project(dropAt).x}%`, top: `${dropAt.y}%` }}
+              aria-hidden="true"
+            >
+              {RESOURCE_ICONS[placing]}
+            </div>
+          )}
           {farm.size === 0 && <div className="fa-empty">The pasture is empty. Add an animal below.</div>}
           <div className="fa-fence" />
         </div>
@@ -716,17 +972,23 @@ export default function FarmModel() {
                 style={placing === kind
                   ? { background: "var(--wood)", color: "var(--cream)" }
                   : undefined}
-                onClick={() => setPlacing((p) => (p === kind ? null : kind))}
+                onClick={(event) => arm(kind, event.currentTarget)}
               >
                 {RESOURCE_ICONS[kind]} {kind}
               </button>
             ))}
           </div>
 
-          {placing && (
+          {placing && dropAt && (
             <div className="fa-yield">
               <span className="none">
-                Click anywhere in the pasture to put down {placing}.
+                Click anywhere in the pasture to put down {placing} — or arrow keys
+                to aim, Enter to drop, Esc to cancel.
+              </span>
+              {/* The only account of where the drop point is for anyone who
+                  cannot see the marker on the field. */}
+              <span className="item" style={{ marginLeft: "auto" }} aria-live="polite">
+                {RESOURCE_ICONS[placing]} {Math.round(dropAt.x)}%, {Math.round(dropAt.y)}%
               </span>
             </div>
           )}
