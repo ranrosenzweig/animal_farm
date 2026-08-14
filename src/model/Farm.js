@@ -115,6 +115,29 @@ export default class Farm {
   }
 
   /**
+   * Fill every source of `kind` back to the brim. Sources drain in place, so
+   * this refills the ones already in the field rather than laying down new
+   * ones — a drained source is dropped from the field the step it empties,
+   * which is what putting a fresh one down is for.
+   * @param {"water"|"grass"} kind
+   * @returns {{ farm: Farm, added: number, filled: number }} how much went in,
+   *   and how many sources took any of it
+   */
+  topUp(kind) {
+    let added = 0;
+    let filled = 0;
+    for (const resource of this.resources) {
+      if (resource.kind !== kind) continue;
+      const got = resource.refill(resource.capacity);
+      if (got > 0) {
+        added += got;
+        filled += 1;
+      }
+    }
+    return { farm: new Farm(this.name, this.animals, this.resources), added, filled };
+  }
+
+  /**
    * The closest source of `kind` that still has something in it. A drained
    * one stops attracting animals; null means there is none left at all.
    * @returns {Resource | null}
