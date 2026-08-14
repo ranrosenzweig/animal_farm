@@ -110,6 +110,16 @@ const NUDGE_KEYS = {
   ArrowRight: { x: NUDGE, y: 0 },
 };
 
+/**
+ * How a settled dispute reads in the log. Whether the two of them already
+ * knew each other is the whole point of the encounter, so the line says so:
+ * familiar animals stand aside, strangers have to back down.
+ */
+function contestNotice({ winner, loser, source }) {
+  const verb = loser.familiarity(winner) > 0.5 ? "stands aside for" : "backs down from";
+  return `${loser.name} ${verb} ${winner.name} at the ${source.name.toLowerCase()}.`;
+}
+
 /** Calm when a drive is low, urgent when it is high. Condition passes 1 - health. */
 function driveColor(level) {
   if (level < 0.4) return "#6f9451";
@@ -183,9 +193,10 @@ export default function FarmModel() {
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
-      const { farm: next, died, dried, born } = farmRef.current.stepAll();
+      const { farm: next, died, dried, born, contests } = farmRef.current.stepAll();
       setFarm(next);
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
+      for (const settled of contests) pushLog(contestNotice(settled), "contest");
       for (const baby of born) pushLog(baby.birthNotice(), "born");
       for (const animal of died) pushLog(animal.epitaph(), "died");
     }, stepMs);
@@ -212,13 +223,14 @@ export default function FarmModel() {
    * farm decides where — or whether — it can go.
    */
   function walk(animal) {
-    const { farm: next, outcome, died, born } = farm.step(animal.id);
+    const { farm: next, outcome, died, born, contests } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move");
     } else {
       pushLog(animal.narrate(), animal.goal);
     }
+    for (const settled of contests) pushLog(contestNotice(settled), "contest");
     for (const baby of born) pushLog(baby.birthNotice(), "born");
     for (const lost of died) pushLog(lost.epitaph(), "died");
   }
