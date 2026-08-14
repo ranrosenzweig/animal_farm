@@ -52,6 +52,7 @@ const causes = new Map();
 let animalSteps = 0;
 let births = 0;
 let deaths = 0;
+let closestTie = 0;
 let worstOverlap = 0;
 let emptiedAt = null;
 
@@ -65,6 +66,7 @@ for (let step = 1; step <= STEPS; step++) {
       range[drive].max = Math.max(range[drive].max, level);
       if (level >= 0.999) pinned[drive] += 1;
     }
+    closestTie = Math.max(closestTie, 0, ...animal.bonds.values());
   }
   worstOverlap = Math.max(worstOverlap, farm.overlaps().length);
 
@@ -107,6 +109,15 @@ if (farm.size > 0) {
   if (young || expecting) console.log(`  ${young} young, ${expecting} expecting`);
 }
 
+console.log("\nCompany:");
+console.log(`  the closest tie formed all run reached ${pct(closestTie)}`);
+if (farm.size > 0) {
+  const mean = (xs) => (xs.reduce((s, n) => s + n, 0) / xs.length).toFixed(1);
+  const known = farm.animals.map((a) => a.bonds.size);
+  const close = farm.animals.map((a) => [...a.bonds.values()].filter((t) => t > 0.5).length);
+  console.log(`  each ended knowing ${mean(known)} others, ${mean(close)} of them well, in a herd of ${farm.size}`);
+}
+
 console.log("\nIn the field:");
 console.log(`  opened  ${openingStock.map((s) => `${s.label} ${s.volume}${s.unit}`).join("   ")}`);
 console.log(`  closed  ${farm.stock().map((s) => `${s.label} ${s.volume}${s.unit}`).join("   ")}`);
@@ -127,6 +138,17 @@ const wanted = new Set(SPECIES.flatMap((S) => Object.entries(S.affinities).filte
 for (const goal of GOAL_NAMES) {
   if (goalSteps[goal] === 0 && wanted.has(goal)) {
     warnings.push(`no animal ever chose "${goal}", though some species have an affinity for it`);
+  }
+}
+if (animalSteps > 0 && closestTie < 0.5) {
+  warnings.push(`no tie ever passed ${pct(closestTie)} — animals may not be standing together long enough to bond`);
+}
+// Ties to the dead and the departed should fade out on their own. If an
+// animal is holding far more than the herd can account for, they aren't.
+if (farm.size > 0) {
+  const most = Math.max(...farm.animals.map((a) => a.bonds.size));
+  if (most > farm.size * 2) {
+    warnings.push(`one animal holds ${most} ties in a herd of ${farm.size} — the departed are not being forgotten`);
   }
 }
 if (worstOverlap > 0) warnings.push(`${worstOverlap} overlapping pairs seen — the no-overlap rule is broken`);

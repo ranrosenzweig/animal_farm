@@ -1,6 +1,6 @@
 import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
-import { randomInt } from "./random.js";
+import { randomAngle, randomInt } from "./random.js";
 import { ROCKS, standable } from "./terrain.js";
 import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
@@ -72,6 +72,20 @@ export default class Farm {
 
   bySpecies(species) {
     return this.animals.filter((a) => a.species === species);
+  }
+
+  /**
+   * Who `animal` knows best, closest tie first. An animal holds nothing but
+   * ids; only the farm can say whose they are — and only the farm can leave
+   * out the ones who have since died or been taken away.
+   * @returns {{ animal: import("./Animal.js").default, tie: number }[]}
+   */
+  companionsOf(animal, limit = 3) {
+    return this.animals
+      .filter((other) => other !== animal && animal.familiarity(other) > 0)
+      .map((other) => ({ animal: other, tie: animal.familiarity(other) }))
+      .sort((a, b) => b.tie - a.tie)
+      .slice(0, limit);
   }
 
   /* ---------------------------------------------------------------- */
@@ -191,10 +205,16 @@ export default class Farm {
     for (const mother of this.animals) {
       if (!mother.isAlive() || !mother.readyToBirth()) continue;
       const baby = mother.newborn();
-      const spot = this.freeSpotFor(baby);
+      // Beside its mother if there is room there, and only failing that
+      // wherever the field has a gap.
+      const spot = this.freeSpotNear(mother, baby) ?? this.freeSpotFor(baby);
       if (!spot) continue; // no room in the field; the birth waits
       baby.name = this.unusedName(baby.name);
       baby.moveTo(spot);
+      // The two of them know each other from the first step, without having
+      // had to stand together to learn it.
+      baby.bondTo(mother);
+      mother.bondTo(baby);
       mother.delivered();
       born.push(baby);
     }
@@ -259,6 +279,30 @@ export default class Farm {
   }
 
   /**
+   * A spot with room for `animal` as near to `beside` as the two of them are
+   * allowed to stand, trying further out only as the closer ground turns out
+   * to be taken. A newborn ends up at its mother's flank, not merely in her
+   * quarter of the field — which matters, because two animals at their
+   * minimum separation are exactly close enough to count as company.
+   * @returns {{ x: number, y: number } | null} null when the ground around
+   *   `beside` is all taken; the caller falls back to the whole field.
+   */
+  freeSpotNear(beside, animal, attempts = 60) {
+    const closest = animal.radius + beside.radius;
+    const reach = animal.radius * 3;
+    for (let i = 0; i < attempts; i++) {
+      const angle = randomAngle();
+      const away = closest + (i / attempts) * reach;
+      const spot = clampToPasture({
+        x: beside.x + Math.cos(angle) * away,
+        y: beside.y + Math.sin(angle) * away,
+      });
+      if (this.isClear(spot, animal)) return spot;
+    }
+    return null;
+  }
+
+  /**
    * Think, steer, and carry one animal forward under the forces on it.
    *
    * It may well end the step standing inside another animal or halfway into a
@@ -269,6 +313,10 @@ export default class Farm {
   drive(mover) {
     const context = { neighbors: this.animals.filter((a) => a !== mover), farm: this };
     mover.think(context);
+    // Ties form and fade by who is standing about, which has nothing to do
+    // with what the animal decided to do or whether it manages to move — so
+    // this happens every step, before any of that.
+    mover.keepCompany(context.neighbors);
     // A goal pursued by standing still is pursued facing wherever it already was.
     if (!mover.isStill()) mover.turnToward(mover.heading(context));
     mover.push();
@@ -313,12 +361,15 @@ export default class Farm {
       // nobody ends up inside a rock or outside the fence.
       for (const animal of this.animals) {
         for (const rock of ROCKS) deepest = Math.max(deepest, separateStatic(animal, rock));
-        confine(animal);
+        deepest = Math.max(deepest, confine(animal));
       }
-      // Settle to well inside the slop, not merely to it: the rock and fence
-      // passes below can nudge a body back into its neighbour, and the figure
-      // being tested is from *before* this pass's corrections. The margin is
-      // what keeps `overlaps` honestly empty rather than borderline.
+      // One test for all three, and it is "did anything have to move much?".
+      // Shoving a body off the fence can drive it into a neighbour nothing has
+      // looked at since, so the fence counts towards the same figure as the
+      // bodies and the rocks — but by *how far* it moved, not merely whether
+      // it moved, or an animal dozing against a rail would keep this running
+      // to the cap forever. Settling to well inside the slop rather than
+      // merely to it is the margin that keeps `overlaps` honestly empty.
       if (deepest <= CONTACT_SLOP / 4) return pass + 1;
     }
     return RELAXATIONS;

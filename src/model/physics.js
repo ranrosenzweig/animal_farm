@@ -33,25 +33,34 @@ export const RESTITUTION = 0.35;
 
 /**
  * How deep two bodies may be inside one another and still count as merely
- * touching, in pasture units — about a fifth of a percent of an animal's
- * radius, far too little to see.
+ * touching, in pasture units — around half a percent of an animal's radius,
+ * which on a rendered field is a fifth of a pixel.
  *
  * Every solver of this kind needs one. Prising a jammed crowd apart is an
  * iterative business that approaches contact without ever landing exactly on
  * it, so demanding zero penetration would mean iterating forever. This is the
  * line between "settled" and "still overlapping", and `Farm.overlaps` reads
  * the same number, so the model and its checks agree on what an overlap is.
+ *
+ * It is not a free dial. Tightening it towards zero does not make the field
+ * tidier, it makes a packed one fail to settle at all — the passes run out
+ * mid-crowd and leave a *visible* overlap instead of an invisible one.
  */
-export const CONTACT_SLOP = 0.01;
+export const CONTACT_SLOP = 0.03;
 
 /**
- * The most passes to spend prising bodies apart in one step. Separating one
- * pair can drive one of them into a third — exactly what a horse coming
- * through a knot of sheep does — so it takes repeated passes, and a packed
- * field takes a great many. The passes stop as soon as everything is settled
- * to within `CONTACT_SLOP`; this is only the ceiling for the worst jams.
+ * The most passes to spend prising bodies apart in one step.
+ *
+ * Separating one pair can drive one of them into a third — exactly what a
+ * horse coming through a knot of sheep does — so it takes repeated passes, and
+ * a packed field takes a great many. The passes stop as soon as everything is
+ * settled to within `CONTACT_SLOP`, which on an ordinary field is after about
+ * a dozen; this is only the ceiling for the worst jams, where a field stocked
+ * far past comfort has to shuffle a whole crowd to make room. It is worth
+ * being generous with, because the alternative to spending the passes is
+ * leaving animals standing in one another.
  */
-export const RELAXATIONS = 400;
+export const RELAXATIONS = 2000;
 
 /**
  * Below this speed a body is standing still. Real ground grips: without a
@@ -211,18 +220,19 @@ export function separateStatic(body, obstacle) {
 
 /**
  * Put a body back inside the fence, position only. Used on every separating
- * pass, where touching the fence is not news and must not be reported as
- * unfinished work — otherwise a body dozing against a rail would keep the
- * passes running to the cap every single step.
- * @returns {boolean} whether it had strayed outside
+ * pass, so what it reports is *how far* it had to move the body and not merely
+ * whether it did: a body dozing against a rail gets clamped by a rounding
+ * error every pass, and treating that as unfinished work would keep the passes
+ * running to the cap for the whole life of the farm.
+ * @returns {number} how far it had to be moved, 0 if it was already inside
  */
 export function confine(body) {
   const x = Math.min(PASTURE.maxX, Math.max(PASTURE.minX, body.x));
   const y = Math.min(PASTURE.maxY, Math.max(PASTURE.minY, body.y));
-  if (x === body.x && y === body.y) return false;
+  const moved = Math.hypot(x - body.x, y - body.y);
   body.x = x;
   body.y = y;
-  return true;
+  return moved;
 }
 
 /**

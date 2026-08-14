@@ -112,7 +112,7 @@ farm.overlaps();                             // always [] — the invariant
 
 That invariant now carries a tolerance. Prising a jammed crowd apart is
 iterative and approaches contact without landing exactly on it, so
-`CONTACT_SLOP` (0.01 units, a fifth of a percent of an animal's radius) is the
+`CONTACT_SLOP` (0.03 units, about half a percent of an animal's radius) is the
 line between *touching* and *overlapping*. `resolve` settles to well inside it
 and `Farm.overlaps` reads the same number, so the model and its checks agree on
 what an overlap is.

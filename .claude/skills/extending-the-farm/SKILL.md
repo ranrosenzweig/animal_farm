@@ -60,7 +60,9 @@ shows a `roamHeading()` override.
 1. `src/model/goals.js` — a `GOALS` entry. Fields: `relieves` (a drive name, or
    omit for one that satisfies nothing), `place(animal, context)` returning a
    point or `null`, `narrate(animal)`. Optional: `satisfied()` when arriving
-   somewhere isn't the test, `anywhere`, `still`, `passive`, `consumes`.
+   somewhere isn't the test, `anywhere`, `still`, `passive`, `consumes`,
+   `worth()` when being there earns less than the full relief (`flock` pays
+   less among strangers).
    For a goal served by a depleting resource, spread `fromSource(kind)`.
 2. **Every species' `affinities`, plus `Animal.affinities`** — see the silent-
    failure rule. A goal nobody has an affinity for can never be chosen.

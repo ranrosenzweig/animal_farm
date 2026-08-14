@@ -87,14 +87,23 @@ export const GROUND = {
 /**
  * The patches of ground that are not meadow, as circles in pasture units.
  * Order matters only where two overlap: the first one wins.
+ *
+ * Rocks carry a placement rule the soft patches do not, because they are the
+ * only ones an animal cannot walk through: **a rock must stand far enough from
+ * the fence that the biggest animal still fits between the two**. Otherwise
+ * the pocket between rock and rail has no legal ground in it at all, and a cow
+ * that wanders in gets shoved off the rail by one rule and out of the stone by
+ * the other, for as many passes as the solver will give it. `npm run check`
+ * asserts this, because it is invisible until a large animal happens to walk
+ * into exactly that gap.
  */
 export const PATCHES = [
   { ground: "mud", x: MUD.x, y: MUD.y, radius: 9 },
   { ground: "wood", x: 13, y: 32, radius: 8.5 },
   { ground: "wood", x: 28, y: 21, radius: 6 },
   { ground: "wood", x: 86, y: 70, radius: 7 },
-  { ground: "rock", x: 55, y: 25, radius: 4 },
-  { ground: "rock", x: 40, y: 66, radius: 3.5 },
+  { ground: "rock", x: 55, y: 29, radius: 4 },
+  { ground: "rock", x: 40, y: 62, radius: 3.5 },
 ];
 
 /** The patches nothing can walk through — static bodies, for the physics. */

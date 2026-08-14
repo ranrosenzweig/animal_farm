@@ -20,8 +20,8 @@
 // them is the speed cap, which is the physical version of the same worry.
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
-import { inBounds } from "../src/model/pasture.js";
-import { STEEPEST, rockPenetration } from "../src/model/terrain.js";
+import { PASTURE, inBounds } from "../src/model/pasture.js";
+import { ROCKS, STEEPEST, rockPenetration } from "../src/model/terrain.js";
 import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
@@ -151,6 +151,32 @@ console.log(`Most any body was carried past its own cruising speed in one step: 
   } else {
     console.log(`Resting: ${sleeper.name} the ${sleeper.species.toLowerCase()} coasted to a ` +
       `dead stop in ${stoppedAfter} steps and stayed put.`);
+  }
+}
+
+// No rock may stand so near the fence that the biggest animal cannot fit
+// between the two. The pocket in between would have no legal ground in it, and
+// anything that wandered in would be shoved off the rail and out of the stone
+// turn about until the solver gave up — taking every overlap near it down with
+// it. Cheap to check, and invisible until something large walks into the gap.
+{
+  const widest = SPECIES.reduce((w, S) => Math.max(w, S.radius), 0);
+  for (const rock of ROCKS) {
+    const room = rock.radius + widest;
+    const tight = [
+      ["the west fence", rock.x - room - PASTURE.minX],
+      ["the east fence", PASTURE.maxX - room - rock.x],
+      ["the north fence", rock.y - room - PASTURE.minY],
+      ["the south fence", PASTURE.maxY - room - rock.y],
+    ].filter(([, slack]) => slack < 0);
+    for (const [which, slack] of tight) {
+      fail(`terrain: the rock at (${rock.x}, ${rock.y}) leaves no room against ${which} — ` +
+        `a ${widest}-radius animal is ${(-slack).toFixed(1)} short of fitting through`);
+    }
+  }
+  if (failures === 0) {
+    console.log(`Rocks: all ${ROCKS.length} stand clear enough of the fence for the widest ` +
+      `animal (radius ${widest}) to pass between.`);
   }
 }
 
