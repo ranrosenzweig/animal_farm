@@ -11,7 +11,7 @@
     "mind": "node scripts/claude-mind.js",
     "check": "node scripts/check.js",
     "probe": "node scripts/probe.js",
-    "ui-check": "python .claude/skills/webapp-testing/scripts/with_server.py --server \"npm run dev\" --port 5173 -- python scripts/ui-check.py",
+    "ui-check": "python .claude/skills/webapp-testing/scripts/with_server.py --server \"npm run dev -- --port 5273 --strictPort --host 127.0.0.1\" --port 5273 -- python scripts/ui-check.py",
     "build": "vite build",
     "preview": "vite preview"
   },

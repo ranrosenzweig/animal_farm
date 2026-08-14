@@ -57,9 +57,19 @@ read as `button "🐄 Bessie ♂"` and always did, and the census chips carry th
 species name in text beside the colour dot. Open a browser and check the
 accessible name with `aria_snapshot()` before you touch either.
 
-Known and still open: putting water or grass down is mouse-only. `.fa-pasture`
-has no `tabindex` and the flow needs click coordinates, so keyboard users cannot
-place a resource at all.
+Two things that were once wrong here are fixed, and both look like defects if
+you only read the source:
+
+- **Placing water and grass works by keyboard.** The field becomes a tab stop
+  only while a bucket is armed; arrows aim from the middle of the herd, Enter
+  drops, Escape puts it back. `scripts/ui-check.py` asserts all of it.
+- **The field is a perspective view, not a map.** There is a horizon, hills, a
+  tapered ground plane, and `project()` / `widthAt()` / `sizeAt()` place and
+  scale everything by depth. So the pasture is *deliberately* not square — it
+  measures 650 × 924 — and a percent of width is not a percent of height. That
+  is the projection, not a layout bug. Do not "correct" it with `aspect-ratio`;
+  it would flatten the depth the field is drawn with. Resources are already
+  ellipses at 3:1 by measurement, which is a puddle seen from standing height.
 
 ## Before you report back
 
