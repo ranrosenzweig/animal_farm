@@ -9,6 +9,7 @@ export default class Sheep extends Animal {
   static breeds = ["Merino", "Suffolk", "Dorset", "Romney"];
   static names = ["Shirley", "Woolly", "Dolly", "Fleece", "Barbara"];
   static stepSize = 2.2;  // a shuffle
+  static mass = 70;
   static radius = 5;
   static turnRate = 0.3;
 

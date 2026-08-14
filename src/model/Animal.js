@@ -3,6 +3,8 @@ import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js
 import { DRIVES, clamp01, startingDrives } from "./drives.js";
 import { GOALS, atGoal } from "./goals.js";
 import { RESOURCE_NAMES } from "./Resource.js";
+import { groundAt, slopeAt } from "./terrain.js";
+import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
 
 /**
@@ -11,17 +13,20 @@ import ScriptedMind from "./minds/ScriptedMind.js";
  * An animal is an agent with three layers, and each one only talks to its
  * neighbour:
  *
- *   1. **Body** — where it stands, which way it faces, how fast it walks and
- *      how sharply it can turn. Static metadata plus `facing`/`x`/`y`.
+ *   1. **Body** — a mass at a position with a velocity, pointed some way, able
+ *      to push along its own facing and to turn only so fast. It obeys the
+ *      laws in `physics.js` and the ground in `terrain.js`; it does not get to
+ *      place itself anywhere.
  *   2. **Drives** — hunger, thirst, fatigue, loneliness. They rise on their
  *      own and fall only while the animal is doing something about them.
  *   3. **Mind** — reads a percept, returns an intention. Swappable: a
  *      `ScriptedMind` scores the options arithmetically, and anything else
  *      implementing `decide(percept)` can take its place.
  *
- * The mind chooses a *goal*; the goal names a *place*; the body walks toward
- * it, forward only, and the Farm decides whether that step is allowed. No
- * layer reaches past the next one down.
+ * The mind chooses a *goal*; the goal names a *place*; the body turns toward
+ * it and pushes forward. Where it actually ends up is settled by the forces
+ * on it and by whatever it runs into. No layer reaches past the next one down
+ * — and none of them can overrule the physics.
  */
 export default class Animal {
   /** @type {string} Display name of the kind. Subclasses must override. */
@@ -37,11 +42,18 @@ export default class Animal {
   /** @type {string[]} Candidate names for randomly generated members. */
   static names = ["Nameless"];
   /**
-   * @type {number} How far one step carries it, in pasture units (the field
-   * is ~84 wide). A step is a small movement — crossing the pasture should
-   * take many of them.
+   * @type {number} How fast it travels on flat meadow with nothing in its way,
+   * in pasture units per step (the field is ~84 wide). It is a cruising speed,
+   * not a stride: thrust is derived from it so that drag settles the body at
+   * exactly this speed on level ground. Uphill it will be slower, downhill
+   * faster, and in mud slower still — none of which it decides.
    */
   static stepSize = 2.5;
+  /**
+   * @type {number} Body mass in kilograms. Decides who gives way when two
+   * animals collide, and how long this one takes to get going or to stop.
+   */
+  static mass = 100;
   /** @type {number} Personal space; two animals may not come closer than the sum of their radii. */
   static radius = 5;
   /**
@@ -112,8 +124,14 @@ export default class Animal {
     // A provisional spot; Farm.add() relocates it if something is already there.
     this.x = randomInt(PASTURE.minX, PASTURE.maxX);
     this.y = randomInt(PASTURE.minY, PASTURE.maxY);
-    /** Which way it is pointed. It only ever walks this way. */
+    /** Which way it is pointed. It can only ever push this way. */
     this.facing = randomAngle();
+    /**
+     * How it is actually travelling, in pasture units per step. Not the same
+     * as its facing: a body shoved sideways, or carried on by its own weight,
+     * keeps going that way until something changes its mind for it.
+     */
+    this.velocity = { x: 0, y: 0 };
     /** Which way it prefers to peel off when something blocks its path. */
     this.spin = pick([1, -1]);
     /** How far it has swung away from where it wants to go, to get around something. */
@@ -144,6 +162,7 @@ export default class Animal {
   get color() { return this.constructor.color; }
   get radius() { return this.constructor.radius; }
   get stepSize() { return this.constructor.stepSize; }
+  get mass() { return this.constructor.mass; }
   get turnRate() { return this.constructor.turnRate; }
   get affinities() { return this.constructor.affinities; }
 
@@ -152,6 +171,77 @@ export default class Animal {
    * stride and a stiff neck make for a wide turn.
    */
   get turningCircle() { return this.stepSize / this.turnRate; }
+
+  /* ---------------------------------------------------------------- */
+  /* Body: mass, force and motion                                      */
+  /* ---------------------------------------------------------------- */
+
+  /** How fast it is actually travelling, whatever it meant to do. */
+  get speed() { return Math.hypot(this.velocity.x, this.velocity.y); }
+
+  /** Steps it takes to work up to speed, or to shed it. Heavier is slower. */
+  get responseTime() { return responseTime(this.mass); }
+
+  /**
+   * How hard the ground resists it, per unit of speed. Falls straight out of
+   * the mass and the response time — those two are what a drag balance is
+   * made of, so there is nothing else here to tune.
+   */
+  get dragCoefficient() { return this.mass / this.responseTime; }
+
+  /**
+   * What its legs are worth, in force. Set so that on flat meadow thrust and
+   * drag balance at exactly `stepSize`, which is why giving these animals
+   * physics did not change how fast any of them crosses level ground.
+   */
+  get thrust() { return this.dragCoefficient * this.stepSize; }
+
+  /**
+   * The fastest it can be travelling, however it came to be. Its own legs
+   * cannot reach this; only being hit by something far heavier can.
+   */
+  get topSpeed() { return this.stepSize * 3; }
+
+  /**
+   * Everything pushing on it this step, summed: its own legs along its facing,
+   * and gravity down whatever slope it is standing on. Drag is left out
+   * because `integrate` solves for it rather than adding it in.
+   *
+   * An animal pursuing a goal it performs by standing still puts down no
+   * thrust at all — and once stopped it has its feet planted, so the hill
+   * does not carry it off while it rests. That last part is why this returns
+   * null rather than a zero force: nothing at all is to happen to it.
+   * @private
+   */
+  forces() {
+    const push = this.isStill() ? 0 : this.thrust;
+    if (push === 0 && this.speed < STOPPED) return null;
+
+    const slope = slopeAt(this);
+    return {
+      x: Math.cos(this.facing) * push - this.mass * GRAVITY * slope.x,
+      y: Math.sin(this.facing) * push - this.mass * GRAVITY * slope.y,
+    };
+  }
+
+  /**
+   * One step of physics: work out the forces, let drag settle against them,
+   * and travel however far the velocity carries it. What it runs into on the
+   * way is the Farm's business, not its own.
+   */
+  push() {
+    const force = this.forces();
+    if (!force) {
+      this.velocity.x = 0;
+      this.velocity.y = 0;
+      return this;
+    }
+
+    integrate(this, force, this.dragCoefficient * groundAt(this).drag, this.topSpeed);
+    this.x += this.velocity.x;
+    this.y += this.velocity.y;
+    return this;
+  }
 
   /** The goal it is currently pursuing. */
   get goal() { return this.intention.goal; }
@@ -449,27 +539,21 @@ export default class Animal {
     this.veer = Math.abs(this.veer) < 0.05 ? 0 : this.veer * 0.5;
   }
 
-  /** Where this animal lands if it walks `angle` for `distance`. */
-  positionAfter(angle, dist = this.stepSize) {
-    return { x: this.x + Math.cos(angle) * dist, y: this.y + Math.sin(angle) * dist };
-  }
-
   /** True if standing at `point` would put this animal inside `other`'s space. */
   wouldCrowd(point, other) {
     return distance(point, other) < this.radius + other.radius;
   }
 
-  /** Actually stand somewhere. Only the Farm should call this. */
+  /**
+   * Set it down somewhere, at rest. Only the Farm should call this, and only
+   * to place an animal — arriving, or being born. Everything that happens to
+   * it afterwards happens by being pushed.
+   */
   moveTo({ x, y }) {
     this.x = x;
     this.y = y;
+    this.velocity = { x: 0, y: 0 };
     return this;
-  }
-
-  /** Step forward to `spot`, which lies along `angle` — now the way it faces. */
-  advanceTo(spot, angle) {
-    this.facing = normalizeAngle(angle);
-    return this.moveTo(spot);
   }
 
   /* ---------------------------------------------------------------- */

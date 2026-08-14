@@ -9,6 +9,7 @@ export default class Pig extends Animal {
   static breeds = ["Yorkshire", "Duroc", "Hampshire", "Berkshire"];
   static names = ["Wilbur", "Babe", "Hamlet", "Peppa", "Truffle"];
   static stepSize = 3.2;   // a purposeful trot
+  static mass = 120;
   static radius = 5;
   static turnRate = 0.35;
 

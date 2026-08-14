@@ -9,6 +9,7 @@ export default class Cow extends Animal {
   static breeds = ["Holstein", "Jersey", "Angus", "Hereford"];
   static names = ["Buttercup", "Daisy", "Clover", "Bessie", "Rosie"];
   static stepSize = 1.8;   // plodding — the slowest thing in the field
+  static mass = 600;       // the heaviest; nothing here shifts a cow
   static radius = 5.5;     // takes up room
   static turnRate = 0.22;  // unhurried about changing its mind
 

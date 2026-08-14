@@ -1,6 +1,11 @@
 import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomInt } from "./random.js";
+import { ROCKS, standable } from "./terrain.js";
+import {
+  CONTACT_SLOP, RELAXATIONS, STOPPED,
+  capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
+} from "./physics.js";
 import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
 
 /**
@@ -8,8 +13,8 @@ import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
  * questions about them as a whole.
  *
  * The farm is also the only thing that knows where everyone is standing, so
- * it — not the animal — decides whether a step is allowed. An animal asks
- * for a direction; the farm grants the ground.
+ * it — not the animal — settles what happens when they meet. An animal pushes
+ * itself along; the farm runs the collisions.
  *
  * `add`, `remove` and `step` return a *new* Farm rather than mutating this
  * one, so a Farm can sit directly in React state and comparisons stay
@@ -17,17 +22,6 @@ import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
  * identity (and its position) as the farm moves from version to version.
  */
 export default class Farm {
-  /**
-   * Lines tried when the way ahead is blocked, as fractions of the animal's
-   * own turn rate: dead ahead first, then the slightest lean to either side.
-   * Nothing here exceeds ±1 turn rate, so an animal can never sidestep or
-   * back up — the most it can do is shade the line it was already walking.
-   */
-  static NUDGES = [0, 0.5, -0.5, 1, -1];
-
-  /** Step lengths tried on each line: full stride, then shorter ones. */
-  static STRIDES = [1, 0.6, 0.35];
-
   /**
    * @param {string} name
    * @param {import("./Animal.js").default[]} animals
@@ -239,11 +233,13 @@ export default class Farm {
   /* ---------------------------------------------------------------- */
 
   /**
-   * May `mover` stand at `point`? Only if it is inside the fence and no
-   * other animal's personal space reaches it.
+   * May `mover` stand at `point`? Only if it is inside the fence, clear of the
+   * rocks, and no other animal's personal space reaches it.
    */
   isClear(point, mover) {
-    return inBounds(point) && this.animals.every((a) => a === mover || !mover.wouldCrowd(point, a));
+    return inBounds(point)
+      && standable(point, mover.radius)
+      && this.animals.every((a) => a === mover || !mover.wouldCrowd(point, a));
   }
 
   /**
@@ -263,53 +259,109 @@ export default class Farm {
   }
 
   /**
-   * Live one animal for one step: it feels, it may reconsider, and then it
-   * acts on whatever it decided.
+   * Think, steer, and carry one animal forward under the forces on it.
    *
-   * Acting means turning as far toward its goal as its neck allows and then
-   * walking *forward* along the facing it ends up with. If the ground ahead
-   * is taken it may shade the line very slightly or shorten the stride, but
-   * it cannot step around the obstacle — so a blocked animal stays where it
-   * is, having turned a little, and tries a fresh line next step.
-   *
-   * @returns {"moved" | "resting" | "blocked"}
+   * It may well end the step standing inside another animal or halfway into a
+   * rock. `resolve` sorts that out once everyone has moved, because a
+   * collision is about two bodies and neither of them gets to settle it alone.
    * @private
    */
-  stepOne(mover) {
+  drive(mover) {
     const context = { neighbors: this.animals.filter((a) => a !== mover), farm: this };
     mover.think(context);
-
-    // Some goals are pursued by staying put; that isn't being stuck.
-    if (mover.isStill()) return "resting";
-
-    const facing = mover.turnToward(mover.heading(context));
-
-    for (const stride of Farm.STRIDES) {
-      for (const nudge of Farm.NUDGES) {
-        const angle = facing + nudge * mover.turnRate;
-        const spot = mover.positionAfter(angle, mover.stepSize * stride);
-        if (!this.isClear(spot, mover)) continue;
-        mover.advanceTo(spot, angle);
-        mover.settle();
-        this.courtship(mover);
-        return "moved";
-      }
-    }
-    mover.balk();
-    this.courtship(mover); // a pair that met and stopped is still a pair
-    return "blocked";
+    // A goal pursued by standing still is pursued facing wherever it already was.
+    if (!mover.isStill()) mover.turnToward(mover.heading(context));
+    mover.push();
   }
 
   /**
-   * Live one animal for one step.
+   * Sort out everything that ended the step overlapping: animal against
+   * animal, animal against rock, animal against fence.
+   *
+   * Momentum is traded first, once per touching pair — a collision happens
+   * once, and bouncing the same pair again on a later pass would invent energy
+   * the field never had. Then the bodies are prised apart, over and over,
+   * because separating one pair can drive one of them into a third; that is
+   * exactly what a horse coming through a knot of sheep does. The passes stop
+   * as soon as everything is settled to within `CONTACT_SLOP`, which on an
+   * ordinary field is after one or two.
+   * @returns {number} passes spent, which is how jammed the field was
+   * @private
+   */
+  resolve() {
+    for (let i = 0; i < this.animals.length; i++) {
+      for (let j = i + 1; j < this.animals.length; j++) {
+        collide(this.animals[i], this.animals[j]);
+      }
+    }
+    for (const animal of this.animals) {
+      for (const rock of ROCKS) collideStatic(animal, rock);
+      containWithin(animal);
+      // Every impulse of this round has now landed on it, so this is where the
+      // speed limit belongs — after the shoving, not only after the striding.
+      capSpeed(animal, animal.topSpeed);
+    }
+
+    for (let pass = 0; pass < RELAXATIONS; pass++) {
+      let deepest = 0;
+      for (let i = 0; i < this.animals.length; i++) {
+        for (let j = i + 1; j < this.animals.length; j++) {
+          deepest = Math.max(deepest, separate(this.animals[i], this.animals[j]));
+        }
+      }
+      // The ground has the last word: whatever the bodies did to each other,
+      // nobody ends up inside a rock or outside the fence.
+      for (const animal of this.animals) {
+        for (const rock of ROCKS) deepest = Math.max(deepest, separateStatic(animal, rock));
+        confine(animal);
+      }
+      // Settle to well inside the slop, not merely to it: the rock and fence
+      // passes below can nudge a body back into its neighbour, and the figure
+      // being tested is from *before* this pass's corrections. The margin is
+      // what keeps `overlaps` honestly empty rather than borderline.
+      if (deepest <= CONTACT_SLOP / 4) return pass + 1;
+    }
+    return RELAXATIONS;
+  }
+
+  /**
+   * What became of an animal this round, given where it stood before it, and
+   * the nudge to its steering that follows from that.
+   *
+   * "Blocked" now means it pushed and got nowhere — pressed into a rock, or
+   * into a neighbour heavy enough to ignore it — which is its cue to lean off
+   * its line and try a different one next step.
+   * @returns {"moved" | "resting" | "blocked"}
+   * @private
+   */
+  outcomeFor(animal, from) {
+    if (animal.isStill()) return "resting";
+    if (Math.hypot(animal.x - from.x, animal.y - from.y) <= STOPPED) {
+      animal.balk();
+      return "blocked";
+    }
+    animal.settle();
+    return "moved";
+  }
+
+  /**
+   * Live one animal for one step. Only it thinks and pushes, but the whole
+   * field still settles afterwards — so a duck shouldered aside by the one
+   * animal that moved really does get shouldered aside.
    * @returns {{ farm: Farm, moved: boolean, outcome: string, intention: object|null }}
    *   `outcome` separates the two reasons an animal doesn't move: it chose to
-   *   stay ("resting") or it had nowhere to go ("blocked").
+   *   stay ("resting") or it pushed and got nowhere ("blocked").
    */
   step(id) {
     const mover = this.find(id);
     if (!mover) return { farm: this, moved: false, outcome: "missing", intention: null, died: [] };
-    const outcome = this.stepOne(mover);
+
+    const from = { x: mover.x, y: mover.y };
+    this.drive(mover);
+    this.resolve();
+    const outcome = this.outcomeFor(mover, from);
+    this.courtship(mover);
+
     const born = this.deliver();
     return {
       farm: this.settled(born),
@@ -322,16 +374,22 @@ export default class Farm {
   }
 
   /**
-   * Live every animal for one step, in turn — each one sees where the others
-   * have already gone this round. Always returns a new Farm: even an animal
-   * that didn't move has felt something change.
-   * @returns {{ farm: Farm, moved: number }} how many actually found room
+   * Live every animal for one step: each thinks and pushes in turn, and then
+   * the whole field resolves at once. Always returns a new Farm — even an
+   * animal that didn't move has felt something change.
+   * @returns {{ farm: Farm, moved: number }} how many actually got anywhere
    */
   stepAll() {
+    const before = this.animals.map((animal) => ({ animal, x: animal.x, y: animal.y }));
+    for (const animal of this.animals) this.drive(animal);
+    this.resolve();
+
     let moved = 0;
-    for (const animal of this.animals) {
-      if (this.stepOne(animal) === "moved") moved += 1;
+    for (const was of before) {
+      if (this.outcomeFor(was.animal, was) === "moved") moved += 1;
+      this.courtship(was.animal); // a pair that met and stopped is still a pair
     }
+
     const born = this.deliver();
     return {
       farm: this.settled(born),
@@ -370,13 +428,20 @@ export default class Farm {
       .sort((a, b) => b.count - a.count);
   }
 
-  /** Any pair standing closer than their radii allow. Should always be empty. */
+  /**
+   * Any pair standing closer than their radii allow. Should always be empty.
+   *
+   * "Closer than allowed" means deeper than `CONTACT_SLOP`, the same hair's
+   * breadth `resolve` settles for. Two animals leaning on one another rest
+   * exactly at arm's length give or take a rounding error, and calling that
+   * an overlap would mean nothing in a crowd ever counted as separated.
+   */
   overlaps() {
     const pairs = [];
     for (let i = 0; i < this.animals.length; i++) {
       for (let j = i + 1; j < this.animals.length; j++) {
         const [a, b] = [this.animals[i], this.animals[j]];
-        if (distance(a, b) < a.radius + b.radius) pairs.push([a, b]);
+        if (a.radius + b.radius - distance(a, b) > CONTACT_SLOP) pairs.push([a, b]);
       }
     }
     return pairs;

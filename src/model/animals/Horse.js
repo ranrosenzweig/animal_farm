@@ -10,6 +10,7 @@ export default class Horse extends Animal {
   static breeds = ["Appaloosa", "Clydesdale", "Mustang", "Arabian"];
   static names = ["Comet", "Thunder", "Bella", "Apollo", "Storm"];
   static stepSize = 6;    // covers ground at a gallop — still the fastest thing here
+  static mass = 500;      // heavy and fast: what it hits, it scatters
   static radius = 5.5;
   static turnRate = 0.3;  // committed to its line; comes about in a wide arc
 

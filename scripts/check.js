@@ -1,19 +1,28 @@
-// Checks the rules of movement under pressure:
+// Checks the laws of the pasture under pressure:
 //   node scripts/check.js
 //
 // Packs the pasture far past a comfortable stocking density, walks everyone
 // for many rounds, and fails if any of these ever stops holding:
 //   * no two animals stand closer than their radii allow
-//   * nobody leaves the field
-//   * nobody moves sideways or backward — every step lands within a turn's
-//     worth of the direction the animal was already facing
-//   * nobody covers more ground in one step than its stride
+//   * nobody leaves the field, and nobody stands inside a rock
+//   * every position and velocity stays a real number
+//   * nobody travels faster than its own top speed — which is what stops a
+//     collision from handing out energy the field never had
 //   * every animal wants something a Mind could actually have chosen, every
-//     drive stays a real 0..1 level, and an animal that chose to stay put did
+//     drive stays a real 0..1 level, and a resting animal comes to a halt
 //   * no resource is ever drawn below empty, and nothing dead stays on the field
+//
+// Two older rules are deliberately gone. Animals used to be forbidden from
+// moving sideways or backward, and from covering more ground than their
+// stride. Both were true of a body that teleported one stride per step and
+// neither survives momentum: a chicken struck by a horse goes where the horse
+// sent it, and a body running downhill outpaces its own legs. What replaces
+// them is the speed cap, which is the physical version of the same worry.
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
-import { angleDifference, inBounds } from "../src/model/pasture.js";
+import { inBounds } from "../src/model/pasture.js";
+import { STEEPEST, rockPenetration } from "../src/model/terrain.js";
+import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
 import Resource from "../src/model/Resource.js";
@@ -49,6 +58,22 @@ const audit = (when) => {
   }
   for (const a of farm.animals) {
     if (!inBounds(a)) fail(`${when}: ${a.name} is outside the fence at (${a.x}, ${a.y})`);
+    // Leaning on a rock is fine; being inside one is not. Same hair's breadth
+    // the solver settles for, so resting against stone doesn't read as a fault.
+    const inRock = rockPenetration(a, a.radius);
+    if (inRock > CONTACT_SLOP) {
+      fail(`${when}: ${a.name} is ${inRock.toFixed(2)} inside a rock at (${a.x.toFixed(1)}, ${a.y.toFixed(1)})`);
+    }
+    if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) {
+      fail(`${when}: ${a.name} is at (${a.x}, ${a.y}) — the physics has come apart`);
+    }
+    if (!Number.isFinite(a.speed)) fail(`${when}: ${a.name} is travelling at ${a.speed}`);
+    // Nothing may outrun its own top speed. A collision that handed out more
+    // energy than went in would show up here first, as a body flung too fast.
+    if (a.speed > a.topSpeed + EPSILON) {
+      fail(`${when}: ${a.name} the ${a.species} is travelling ${a.speed.toFixed(2)} ` +
+        `(top speed ${a.topSpeed.toFixed(2)})`);
+    }
     if (!GOAL_NAMES.includes(a.goal)) fail(`${when}: ${a.name} wants "${a.goal}", which is not a goal`);
     for (const drive of DRIVES) {
       const level = a.drives[drive];
@@ -68,10 +93,10 @@ console.log(`Placed ${farm.size} of ${HERD} animals; ${turnedAway} turned away f
 audit("on placement");
 
 let stepsTaken = 0;
-let widestTurn = 0;
+let fastest = { speed: 0, of: null };
+let hardestShove = 0;
 for (let round = 1; round <= ROUNDS; round++) {
-  // Where everyone stood, and which way they were pointed, before the round.
-  const before = farm.animals.map((a) => ({ animal: a, x: a.x, y: a.y, facing: a.facing }));
+  const before = farm.animals.map((a) => ({ animal: a, x: a.x, y: a.y }));
 
   const { farm: next, moved } = farm.stepAll();
   farm = next;
@@ -80,38 +105,72 @@ for (let round = 1; round <= ROUNDS; round++) {
 
   for (const was of before) {
     const { animal } = was;
-    const dx = animal.x - was.x;
-    const dy = animal.y - was.y;
-    const travelled = Math.hypot(dx, dy);
-
-    // An animal pursuing a goal it performs by standing still must not have moved.
-    if (animal.isStill() && travelled > EPSILON) {
-      fail(`round ${round}: ${animal.name} is ${animal.goal}ing but moved ${travelled.toFixed(2)}`);
-    }
-    if (travelled < EPSILON) continue; // stayed put
-
-    // It may turn up to turnRate before stepping, and shade the line by at
-    // most one more turnRate to get past something. Nothing beyond that.
-    const off = Math.abs(angleDifference(Math.atan2(dy, dx), was.facing));
-    const allowed = 2 * animal.turnRate;
-    widestTurn = Math.max(widestTurn, off);
-    if (off > allowed + EPSILON) {
-      fail(`round ${round}: ${animal.name} the ${animal.species} moved ${off.toFixed(2)} rad ` +
-        `off its facing (may turn ${allowed.toFixed(2)})`);
-    }
-    if (travelled > animal.stepSize + EPSILON) {
-      fail(`round ${round}: ${animal.name} covered ${travelled.toFixed(2)} in one step ` +
-        `(stride ${animal.stepSize})`);
-    }
+    if (animal.speed > fastest.speed) fastest = { speed: animal.speed, of: animal };
+    // How far a body was carried beyond what its own legs could manage. Only
+    // a collision or a slope can do that, and both are supposed to be able to.
+    const travelled = Math.hypot(animal.x - was.x, animal.y - was.y);
+    hardestShove = Math.max(hardestShove, travelled - animal.stepSize);
   }
 
   audit(`round ${round}`);
 }
 
 const possible = farm.size * ROUNDS;
-console.log(`Walked ${ROUNDS} rounds: ${stepsTaken}/${possible} steps found room ` +
+console.log(`Walked ${ROUNDS} rounds: ${stepsTaken}/${possible} steps got somewhere ` +
   `(${((stepsTaken / possible) * 100).toFixed(0)}%); the rest were hemmed in.`);
-console.log(`Sharpest step taken was ${widestTurn.toFixed(2)} rad off the animal's facing.`);
+if (fastest.of) {
+  console.log(`Fastest anything travelled was ${fastest.speed.toFixed(2)} — ` +
+    `${fastest.of.name} the ${fastest.of.species}, whose legs alone are worth ${fastest.of.stepSize}.`);
+}
+console.log(`Most any body was carried past its own cruising speed in one step: ` +
+  `${Math.max(0, hardestShove).toFixed(2)} units.`);
+
+// Resting: alone on the field, an animal told to rest must actually come to a
+// halt and stay there. It coasts now rather than stopping dead — that is what
+// having momentum means — but drag and the grip of the ground have to finish
+// the job, and gravity must not walk it off down the hill afterwards.
+{
+  const sleeper = SPECIES[0].random();
+  let quiet = new Farm("Resting").add(sleeper).farm;
+  sleeper.mind = { cadence: Infinity, decide: () => ({ goal: "rest", reason: "told to" }) };
+  sleeper.intention = { goal: "rest", reason: "told to" };
+
+  let stoppedAfter = null;
+  let drifted = 0;
+  for (let step = 1; step <= 200; step++) {
+    const { x, y } = sleeper;
+    quiet = quiet.stepAll().farm;
+    const shifted = Math.hypot(sleeper.x - x, sleeper.y - y);
+    if (stoppedAfter === null && sleeper.speed === 0) stoppedAfter = step;
+    if (stoppedAfter !== null) drifted = Math.max(drifted, shifted);
+  }
+  if (stoppedAfter === null) {
+    fail(`resting: ${sleeper.name} never came to a stop in 200 steps of resting`);
+  } else if (drifted > EPSILON) {
+    fail(`resting: ${sleeper.name} stopped, then drifted ${drifted.toFixed(3)} — the ground is not holding it`);
+  } else {
+    console.log(`Resting: ${sleeper.name} the ${sleeper.species.toLowerCase()} coasted to a ` +
+      `dead stop in ${stoppedAfter} steps and stayed put.`);
+  }
+}
+
+// The steepest ground has to be climbable by the animal with the least to
+// spare. If this fails, gravity is too strong for the relief and the slowest
+// species will be stranded on a hillside rather than merely slowed by it.
+{
+  const slowest = SPECIES.reduce((worst, S) =>
+    S.stepSize - GRAVITY * STEEPEST * (2.5 + S.mass / 160)
+      < worst.stepSize - GRAVITY * STEEPEST * (2.5 + worst.mass / 160) ? S : worst);
+  const uphill = slowest.stepSize - GRAVITY * STEEPEST * (2.5 + slowest.mass / 160);
+  if (uphill <= STOPPED) {
+    fail(`terrain: a ${slowest.species.toLowerCase()} makes ${uphill.toFixed(2)}/step up the ` +
+      `steepest ground (${STEEPEST.toFixed(3)}) — it cannot climb it at all`);
+  } else {
+    console.log(`Climbing: the steepest ground is ${STEEPEST.toFixed(3)} rise per unit; a ` +
+      `${slowest.species.toLowerCase()} still makes ${uphill.toFixed(2)}/step up it ` +
+      `(${Math.round((uphill / slowest.stepSize) * 100)}% of its pace on the level).`);
+  }
+}
 
 // Famine: with nothing in the field at all, every animal must eventually die
 // and leave it. An animal that survives on an empty farm is a broken model.
@@ -178,6 +237,7 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log(
-  "\nOK — nobody overlapped, left the field, sidestepped, or outran its stride,\n" +
-  "and every animal wanted something real the whole way through."
+  "\nOK — nobody overlapped, left the field, stood in a rock, or outran its own\n" +
+  "top speed; the resting stopped, the slowest can still climb the steepest\n" +
+  "ground, and every animal wanted something real the whole way through."
 );
