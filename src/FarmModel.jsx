@@ -3,6 +3,8 @@ import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
 import { MUD, centroid, clampToPasture } from "./model/pasture.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
+import ScriptedMind from "./model/minds/ScriptedMind.js";
+import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
 
 /** How each goal reads on screen. Presentation only — the model has no icons. */
@@ -70,12 +72,29 @@ const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
   `${project({ x: 100, y: HORIZON }).x}% 0, 100% 100%, 0 100%)`;
 
 /**
- * How long one step takes. The sprite's CSS transition is driven from this
- * same number, so an animal is still gliding into its last spot exactly as
- * the next step is decided — the walk looks continuous instead of a dart
- * followed by a wait.
+ * How long one step takes, until the farmer says otherwise. The sprite's CSS
+ * transition is driven from this same number, so an animal is still gliding
+ * into its last spot exactly as the next step is decided — the walk looks
+ * continuous instead of a dart followed by a wait.
  */
 const STEP_MS = 600;
+
+/** The range the settings slider offers, either side of STEP_MS. */
+const STEP_MIN = 150;
+const STEP_MAX = 1500;
+
+/**
+ * The minds the farmer can put behind an animal. Both take a cadence, so the
+ * settings section can hand one straight to whichever is picked.
+ */
+const MINDS = {
+  scripted: { label: "Scripted", Mind: ScriptedMind },
+  claude: { label: "Claude", Mind: ClaudeMind },
+};
+
+/** How many log lines are kept, whatever the settings choose to show. */
+const LOG_KEPT = 50;
+const LOG_SHOWN = [8, 20, 50];
 
 /**
  * How far one arrow key slides the drop point, in pasture percent. Big enough
@@ -116,6 +135,14 @@ export default function FarmModel() {
   /** Where the keys would drop it, in pasture percent. Null when nothing is armed. */
   const [dropAt, setDropAt] = useState(null);
 
+  /* Settings. Every one of these is a live knob: nothing here is read once. */
+  const [stepMs, setStepMs] = useState(STEP_MS);
+  const [mindKind, setMindKind] = useState("scripted");
+  const [cadence, setCadence] = useState(ScriptedMind.cadence);
+  const [showTags, setShowTags] = useState(true);
+  const [calm, setCalm] = useState(false);
+  const [logLines, setLogLines] = useState(LOG_SHOWN[0]);
+
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const companions = selected ? farm.companionsOf(selected) : [];
   const census = farm.census();
@@ -140,6 +167,19 @@ export default function FarmModel() {
     if (placing) pastureRef.current?.focus();
   }, [placing]);
 
+  // An animal is born with a ScriptedMind of its own, so this runs against the
+  // whole herd on every farm change rather than only when the setting moves —
+  // otherwise a lamb born under the Claude setting would quietly think for
+  // itself. Re-seating a mind costs it whatever it had latched, so a mind that
+  // is already the right kind at the right cadence is left where it is.
+  useEffect(() => {
+    const { Mind } = MINDS[mindKind];
+    for (const animal of farm.animals) {
+      if (animal.mind.constructor === Mind && animal.mind.cadence === cadence) continue;
+      animal.mind = new Mind({ cadence });
+    }
+  }, [farm, mindKind, cadence]);
+
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
@@ -148,12 +188,12 @@ export default function FarmModel() {
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
       for (const baby of born) pushLog(baby.birthNotice(), "born");
       for (const animal of died) pushLog(animal.epitaph(), "died");
-    }, STEP_MS);
+    }, stepMs);
     return () => window.clearInterval(timer);
-  }, [roaming]);
+  }, [roaming, stepMs]);
 
   function pushLog(text, kind) {
-    setLog((l) => [{ id: `${Date.now()}-${Math.random()}`, text, kind }, ...l].slice(0, 8));
+    setLog((l) => [{ id: `${Date.now()}-${Math.random()}`, text, kind }, ...l].slice(0, LOG_KEPT));
   }
 
   function runAction(kind) {
@@ -266,7 +306,10 @@ export default function FarmModel() {
   }
 
   return (
-    <div className="farm-app" style={{ "--step-duration": `${STEP_MS}ms` }}>
+    <div
+      className={"farm-app" + (calm ? " calm" : "")}
+      style={{ "--step-duration": `${stepMs}ms` }}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap');
 
@@ -422,6 +465,13 @@ export default function FarmModel() {
         @media (prefers-reduced-motion: reduce) {
           .fa-sprite, .fa-sprite .emoji { transition: none; animation: none; }
         }
+        /* The same stillness, asked for by hand rather than by the system —
+           for a farmer whose OS says nothing but who wants the field to hold
+           still while they read it. Animals still move; they just cut. */
+        .farm-app.calm .fa-sprite,
+        .farm-app.calm .fa-sprite .emoji,
+        .farm-app.calm .fa-bubble,
+        .farm-app.calm .fa-aim { transition: none; animation: none; }
         /* Only the animal takes the depth, not its name tag: a tag scaled down
            to the far edge would be 6px of text nobody could read. */
         .fa-sprite .emoji {
@@ -778,6 +828,88 @@ export default function FarmModel() {
           border: 1px solid #ccc;
         }
 
+        /* Shut by default: these are the farm's dials, not its controls, and
+           an open panel of them would crowd out the log. */
+        .fa-settings {
+          background: white;
+          border: 1px solid #ddd;
+          border-radius: 8px;
+          padding: 10px 12px;
+        }
+        .fa-settings > summary {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 10.5px;
+          text-transform: uppercase;
+          letter-spacing: 0.6px;
+          color: #6b5f42;
+          cursor: pointer;
+          /* The stock triangle sits on its own baseline and can't be coloured;
+             a ::before is a caret that lines up with 10px caps. */
+          list-style: none;
+        }
+        .fa-settings > summary::-webkit-details-marker { display: none; }
+        .fa-settings > summary::before { content: "▸"; font-size: 9px; }
+        .fa-settings[open] > summary::before { content: "▾"; }
+        .fa-settings[open] > summary { margin-bottom: 4px; }
+        .fa-settings > summary:focus-visible {
+          outline: 2px solid var(--wood);
+          outline-offset: 2px;
+          border-radius: 3px;
+        }
+        .fa-set-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 12.5px;
+          padding: 6px 0;
+          border-bottom: 1px dashed #ececec;
+        }
+        .fa-set-row .l { color: #6b5f42; width: 92px; flex-shrink: 0; }
+        /* Fixed width, monospace: the readout must not shove the slider
+           sideways as the number under it gets longer. */
+        .fa-set-row .v {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10.5px;
+          font-weight: 600;
+          width: 58px;
+          text-align: right;
+          flex-shrink: 0;
+        }
+        .fa-set-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--wood); }
+        .fa-set-row select {
+          flex: 1;
+          min-width: 0;
+          font-family: 'Inter', sans-serif;
+          font-size: 12.5px;
+          padding: 5px 7px;
+          border-radius: 5px;
+          border: 1px solid #ccc;
+          background: white;
+        }
+        .fa-set-checks {
+          display: flex;
+          gap: 14px;
+          flex-wrap: wrap;
+          padding-top: 9px;
+        }
+        .fa-set-checks label {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 12px;
+          color: #6b5f42;
+          cursor: pointer;
+        }
+        .fa-set-checks input { accent-color: var(--wood); }
+        .fa-set-note {
+          font-size: 11px;
+          font-style: italic;
+          color: #6b5f42;
+          padding-top: 8px;
+        }
+
         .fa-log {
           background: #fffdf7;
           border: 1px solid #e6ddc4;
@@ -903,9 +1035,11 @@ export default function FarmModel() {
                 {a.emoji}
                 {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
-              <span className={"tag" + (a.isPregnant ? " expecting" : "")}>
-                {a.name} {SEX_MARKS[a.sex]}
-              </span>
+              {showTags && (
+                <span className={"tag" + (a.isPregnant ? " expecting" : "")}>
+                  {a.name} {SEX_MARKS[a.sex]}
+                </span>
+              )}
             </button>
           ))}
           {placing && dropAt && (
@@ -1106,9 +1240,82 @@ export default function FarmModel() {
             <button className="fa-btn" onClick={addAnimal}>+ Add to pasture</button>
           </div>
 
+          <details className="fa-settings">
+            <summary>Settings</summary>
+
+            <div className="fa-set-row">
+              <span className="l" id="set-step">Step length</span>
+              <input
+                type="range"
+                min={STEP_MIN}
+                max={STEP_MAX}
+                step={50}
+                value={stepMs}
+                aria-labelledby="set-step"
+                onChange={(e) => setStepMs(Number(e.target.value))}
+              />
+              <span className="v">{stepMs} ms</span>
+            </div>
+
+            <div className="fa-set-row">
+              <span className="l" id="set-mind">Animal mind</span>
+              <select
+                value={mindKind}
+                aria-labelledby="set-mind"
+                onChange={(e) => setMindKind(e.target.value)}
+              >
+                {Object.entries(MINDS).map(([key, { label }]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="fa-set-row">
+              <span className="l" id="set-cadence">Rethink every</span>
+              <input
+                type="range"
+                min={1}
+                max={30}
+                value={cadence}
+                aria-labelledby="set-cadence"
+                onChange={(e) => setCadence(Number(e.target.value))}
+              />
+              <span className="v">{cadence} {cadence === 1 ? "step" : "steps"}</span>
+            </div>
+
+            <div className="fa-set-row">
+              <span className="l" id="set-log">Log lines</span>
+              <select
+                value={logLines}
+                aria-labelledby="set-log"
+                onChange={(e) => setLogLines(Number(e.target.value))}
+              >
+                {LOG_SHOWN.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
+            <div className="fa-set-checks">
+              <label>
+                <input type="checkbox" checked={showTags} onChange={(e) => setShowTags(e.target.checked)} />
+                Name tags
+              </label>
+              <label>
+                <input type="checkbox" checked={calm} onChange={(e) => setCalm(e.target.checked)} />
+                Calm motion
+              </label>
+            </div>
+
+            {mindKind === "claude" && (
+              <div className="fa-set-note">
+                Every animal now asks the /decide proxy what to want — run
+                <code> npm run proxy</code>, or they keep the goal they had.
+              </div>
+            )}
+          </details>
+
           <div className="fa-log">
             <div className="fa-log-title">Activity log</div>
-            {log.map((entry) => (
+            {log.slice(0, logLines).map((entry) => (
               <div className="fa-log-row" key={entry.id}>
                 <span className="k">{entry.kind === "info" ? "•" : entry.kind}</span>
                 <span>{entry.text}</span>
