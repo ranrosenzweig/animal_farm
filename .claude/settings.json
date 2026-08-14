@@ -15,7 +15,11 @@
       "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $env:ANTHROPIC_API_KEY = \"sk-ant-dummy-not-a-real-key\"; $env:RATE_LIMIT_PER_MINUTE = \"60\"; $p = Start-Process node -ArgumentList \"server/decide.js\" -PassThru -NoNewWindow -RedirectStandardOutput \"$env:TEMP\\\\proxy2.out\" -RedirectStandardError \"$env:TEMP\\\\proxy2.err\"; Start-Sleep -Milliseconds 800; node \"C:\\\\Users\\\\Ran\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c---git-ai-animal-farm\\\\66caeb32-fe76-40a1-8397-f59cec10b20e\\\\scratchpad\\\\smoke.mjs\"; Write-Output \"--- proxy stderr ---\"; Get-Content \"$env:TEMP\\\\proxy2.err\"; Stop-Process -Id $p.Id -Force)",
       "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; $env:ANTHROPIC_API_KEY = \"sk-ant-dummy-not-a-real-key\"; $p = Start-Process node -ArgumentList \"server/decide.js\" -PassThru -NoNewWindow -RedirectStandardOutput \"$env:TEMP\\\\proxy3.out\" -RedirectStandardError \"$env:TEMP\\\\proxy3.err\"; Start-Sleep -Milliseconds 800; node -e \"fetch\\('http://127.0.0.1:8787/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify\\({options:[{goal:'graze',affinity:0.8,pressure:0.9}],self:{goal:'roam',drives:{hunger:0.9}}}\\)}\\).then\\(async r=>console.log\\(r.status, await r.text\\(\\)\\)\\)\"; Write-Output \"--- what the proxy logged ---\"; Get-Content \"$env:TEMP\\\\proxy3.err\"; Stop-Process -Id $p.Id -Force)",
       "PowerShell(cd c:\\\\_git\\\\ai\\\\animal_farm; Write-Output \"user.name : $\\(git config user.name\\)\"; Write-Output \"user.email: $\\(git config user.email\\)\"; Write-Output \"branch    : $\\(git rev-parse --abbrev-ref HEAD\\)\")",
-      "Bash(npm run *)"
+      "Bash(git commit *)",
+      "Edit(/.claude/skills/extending-the-farm/**)",
+      "Bash(npm run *)",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff src/model/)"
     ]
   }
 }
