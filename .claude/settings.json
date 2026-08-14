@@ -1,11 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)",
-      "Bash(git commit *)",
-      "Bash(git --no-pager diff --stat)",
-      "Bash(git --no-pager diff src/model/)",
-      "Edit(/.claude/skills/extending-the-farm/**)"
+      "Bash(git *)",
+      "Bash(npm *)",
+      "Bash(pytest *)",
+      "Bash(ls *)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(rm -rf / *)"
     ]
   }
 }
+

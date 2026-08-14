@@ -58,6 +58,26 @@ invariant passed while animals died of thirst beside water they never drank.
 Never say a change works because the build succeeded. The build only proves it
 compiles.
 
+Then run these, and **paste the raw output into your report** — not a summary
+of it, the lines themselves:
+
+```sh
+git status --short
+git diff --stat
+```
+
+You are allowed in the model, so there is no file list to check yourself
+against; the diff is the check. If it contains a file the task never mentioned,
+say so plainly rather than letting the reader find it later.
+
+And paste the last line `npm run check` actually printed. Either it says `OK —`
+or it says how many violations there were. Saying "check passed" is not the
+same as showing that it did, and the difference is not rhetorical: a sibling
+agent once reported "no model file was touched" beside a passing `npm run check`
+having, in fact, modified eight model files and logged 28,074 violations. A
+report that disagrees with its own diff costs the reader the time to find the
+change and the trust to check everything else.
+
 ## Reporting
 
 State what you changed, file by file, and what the verification actually said.
