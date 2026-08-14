@@ -15,7 +15,9 @@ src/
     minds/
       Mind.js       the seam: decide(percept) → intention
       ScriptedMind.js   scores options by affinity × pressure, with commitment
-    pasture.js      bounds, landmarks (pond, mud), distance/angle helpers
+    pasture.js      bounds, the mud's place, distance/angle helpers
+    terrain.js      the lie of the land: elevation, slope, and what the ground is made of
+    physics.js      gravity, drag, collisions — the laws bodies obey
     species.js      the registry of known species
     random.js       id + random helpers
     animals/        one file per species
@@ -77,58 +79,109 @@ that neither half has to know too much:
   sheep for the middle of the flock, the horse runs the fence line and comes
   about at the end, the chicken bears constantly left and traces a circle,
   the cow plods to the nearest fence and grazes along it.
-- The **farm** grants the ground. Only `Farm` can see everyone, so only `Farm`
-  decides. `isClear(point, mover)` is the rule itself: inside the fence, and no
+- The **farm** settles what happens when they meet. Only `Farm` can see
+  everyone, so only `Farm` can run the collisions. `isClear(point, mover)` is
+  the rule for *placing* an animal: inside the fence, clear of the rocks, and no
   further into anyone's personal space than `a.radius + b.radius` allows.
 
-### Forward only
+### Push, don't teleport
 
-Animals don't strafe. Each one has a `facing` and walks along it; `heading()`
-is only a *wish*, and `turnToward()` grants at most `turnRate` radians of it per
-step. Changing direction is therefore an arc, not a jump, and how tight an arc
-is itself a species trait — `turningCircle` is just `stepSize / turnRate`, which
-is why a galloping horse (20 units) starts its turn a long way before the fence
-while a chicken (2.5) can spin almost on the spot.
+Nothing on this farm moves by being placed somewhere. An animal is a mass with
+a velocity, and it gets where it is going by pushing — its own legs along its
+`facing`, gravity down whatever it is standing on, drag from the ground, and
+whatever hits it.
 
-`Farm.step(id)` turns the animal, then walks it forward. When the ground ahead
-is taken it may shade the line by up to one more `turnRate` or shorten the
-stride, but it may not step around — so a blocked animal **stays where it is**,
-having turned a little, and tries a fresh line next step (`moved: false`, logged
-as "hemmed in"). Repeated balks widen its `veer`, so it works its way around an
-obstacle over several steps and then settles back onto its heading.
+It still cannot strafe: `heading()` is only a *wish*, `turnToward()` grants at
+most `turnRate` radians of it per step, and thrust goes along the facing that
+results. But `velocity` is its own thing. A body shoved sideways travels
+sideways, and one carried on by its own weight keeps going after it has stopped
+pushing — which is why a resting animal now coasts to a halt rather than
+stopping dead.
+
+`Farm.stepAll()` runs in two halves: everyone thinks and integrates, and *then*
+the whole field resolves at once. That order is the point — a collision is
+about two bodies, and neither gets to settle it alone. Momentum is traded once
+per touching pair, by inverse mass, so a horse coming through a knot of sheep
+scatters them and a chicken walking into a cow does not move the cow.
 
 ```js
-const { farm, moved } = farm.step(someId);   // one animal
-const { farm, moved } = farm.stepAll();      // everyone, in turn; moved = how many found room
+const { farm, moved } = farm.step(someId);   // one animal thinks; the field still settles
+const { farm, moved } = farm.stepAll();      // everyone; moved = how many got anywhere
 farm.overlaps();                             // always [] — the invariant
 ```
 
-`npm run check` audits all of it — overlaps, the fence, stride length, that
-every step lands within a turn's worth of where the animal was already pointed,
-that no source is ever drawn below empty, and that an empty field really does
-kill everything on it:
+That invariant now carries a tolerance. Prising a jammed crowd apart is
+iterative and approaches contact without landing exactly on it, so
+`CONTACT_SLOP` (0.01 units, a fifth of a percent of an animal's radius) is the
+line between *touching* and *overlapping*. `resolve` settles to well inside it
+and `Farm.overlaps` reads the same number, so the model and its checks agree on
+what an overlap is.
+
+`npm run check` audits the laws: overlaps, the fence, that nobody stands inside
+a rock, that nothing outruns its own top speed, that a resting animal really
+does come to rest, that the slowest species can still climb the steepest ground,
+that no source is drawn below empty, and that an empty field kills everything:
 
 ```
-Placed 47 of 90 animals; 43 turned away for lack of room.
-Walked 200 rounds: 2174/9400 steps found room (23%); the rest were hemmed in.
-Sharpest step taken was 1.20 rad off the animal's facing.
-Famine: all 6 of 6 animals died within 377 rounds on an empty field (of thirst).
-OK — nobody overlapped, left the field, sidestepped, or outran its stride,
-and every animal wanted something real the whole way through.
+Placed 42 of 90 animals; 48 turned away for lack of room.
+Walked 200 rounds: 7981/8400 steps got somewhere (95%); the rest were hemmed in.
+Fastest anything travelled was 7.22 — Mallory the Duck, whose legs alone are worth 2.8.
+Resting: Clover the cow coasted to a dead stop in 1 steps and stayed put.
+Climbing: the steepest ground is 0.027 rise per unit; a cow still makes 0.95/step up it (53% of its pace on the level).
+Famine: all 6 of 6 animals died within 416 rounds on an empty field (of thirst).
+OK — nobody overlapped, left the field, stood in a rock, or outran its own
+top speed; the resting stopped, the slowest can still climb the steepest
+ground, and every animal wanted something real the whole way through.
 ```
 
-That 23% is a deliberately overstocked field. At a normal six head it's ~83%.
+Two older rules are deliberately gone. Animals used to be forbidden from moving
+sideways or backward, and from covering more ground than their stride. Both were
+true of a body that teleported one stride per step and neither survives
+momentum — a chicken struck by a horse goes where the horse sent it. The speed
+cap replaces them, and it is a real law: `capSpeed` is applied wherever velocity
+changes, not only where thrust and drag settle.
 
-Placement obeys the same rule: `Farm.add()` looks for a free spot and, if the
-pasture is full, **turns the animal away** (`added: false`) rather than stacking
-it on one already there.
+Placement is unchanged: `Farm.add()` looks for a free spot — inside the fence,
+clear of the rocks, clear of everyone — and if the pasture is full it **turns
+the animal away** (`added: false`) rather than stacking it on one already there.
 
-`stepSize` and `radius` are static per species. A step is deliberately a small
-movement — the field is ~84 units across, and a cow plods 1.8 of them at a time,
-so crossing it takes it the better part of fifty steps. A galloping horse covers
-6, still three times anything else. The UI ticks a step every `STEP_MS` (600ms)
-and runs the sprite's CSS transition for exactly that long, linearly, so a
-walking animal never visibly stops between steps.
+`stepSize`, `mass` and `radius` are static per species. `stepSize` is a
+*cruising speed*, not a stride: `thrust` is derived from it so that thrust and
+drag balance at exactly that speed on flat meadow, which is why giving these
+animals physics did not change how fast any of them crosses level ground. The
+field is ~84 units across and a cow cruises 1.8 of them a step, so crossing it
+takes the better part of fifty. The UI ticks every `STEP_MS` (600ms) and runs
+the sprite's CSS transition for exactly that long, linearly, so a walking animal
+never visibly stops between steps.
+
+### The ground it all happens on
+
+`terrain.js` gives the pasture relief and a surface. Height is a sum of smooth
+bumps rather than a stored grid, for one reason that pays off: a sum of
+Gaussians can be differentiated on paper, so `slopeAt` is *exact* rather than a
+difference between two samples. Gravity gets an honest direction to pull in.
+
+```js
+elevationAt({ x, y });   // how high the ground stands, ~0..1
+slopeAt({ x, y });       // which way it rises, and how steeply — the exact gradient
+groundAt({ x, y });      // meadow | mud | wood | rock, each with its own drag
+```
+
+The two hollows are not decoration — water and mud collect in low ground, so
+the pond and the mud patch sit in them. Rock is impassable, and it is a body:
+animals bounce off it rather than being forbidden to enter.
+
+Because mass cancels out of a drag balance, how much a slope costs an animal
+falls out as `GRAVITY × slope × responseTime` — and `responseTime` grows with
+mass. So a cow labours up the steepest rise at about half its usual pace while a
+horse barely notices, and nothing anywhere had to say that hills are hard for
+cows. `GRAVITY` is sized against `STEEPEST`, the steepest ground the field
+actually has, so the animal with the least to spare is slowed by a hill rather
+than stranded on it.
+
+The pasture UI paints all of this from the very same numbers: every hill drawn
+is one of `RELIEF`'s bumps and every rock is drawn at exactly the radius animals
+collide with. What you see is what they walk on.
 
 ## Agents: drives, goals, minds
 
