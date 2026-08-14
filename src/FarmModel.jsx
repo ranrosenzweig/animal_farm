@@ -4,6 +4,7 @@ import { SPECIES, speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
+import { RESOURCE_KINDS } from "./model/Resource.js";
 import ScriptedMind from "./model/minds/ScriptedMind.js";
 import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
@@ -160,6 +161,13 @@ const LOG_KEPT = 50;
 const LOG_SHOWN = [8, 20, 50];
 
 /**
+ * How empty a source has to get before the farmer is told about it. A quarter
+ * left is far enough ahead to walk over and top it up before anyone goes
+ * thirsty; the settings slider moves it either way.
+ */
+const LOW_AT = 0.25;
+
+/**
  * How far one arrow key slides the drop point, in pasture percent. Big enough
  * to cross the field in a dozen presses, small enough to drop a trough beside
  * one animal rather than on top of the herd.
@@ -215,6 +223,7 @@ export default function FarmModel() {
   const [showTags, setShowTags] = useState(true);
   const [calm, setCalm] = useState(false);
   const [logLines, setLogLines] = useState(LOG_SHOWN[0]);
+  const [lowAt, setLowAt] = useState(LOW_AT);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const companions = selected ? farm.companionsOf(selected) : [];
@@ -222,6 +231,9 @@ export default function FarmModel() {
   const produce = farm.dailyProduce();
   const activity = farm.activity();
   const stock = farm.stock();
+  /** Sources far enough down to be worth mentioning, and which kinds they are. */
+  const lowSources = farm.resources.filter((r) => !r.depleted && r.fullness < lowAt);
+  const lowKinds = new Set(lowSources.map((r) => r.kind));
   const expecting = farm.animals.filter((a) => a.isPregnant).length;
 
   // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
@@ -239,6 +251,26 @@ export default function FarmModel() {
   useEffect(() => {
     if (placing) pastureRef.current?.focus();
   }, [placing]);
+
+  // A source is drawn down in place, so there is no earlier volume to compare
+  // against — what a warning needs is memory of which ones have already been
+  // called out. Topping one up drops it off the list, so the same trough can
+  // warn again the next time it runs down.
+  const warnedLow = useRef(new Set());
+
+  useEffect(() => {
+    for (const source of farm.resources) {
+      if (source.fullness >= lowAt) {
+        warnedLow.current.delete(source.id);
+      } else if (!source.depleted && !warnedLow.current.has(source.id)) {
+        warnedLow.current.add(source.id);
+        pushLog(
+          `${source.name} is running low — ${Math.round(source.volume)} ${source.unit} left.`,
+          "low",
+        );
+      }
+    }
+  }, [farm, lowAt]);
 
   // An animal is born with a ScriptedMind of its own, so this runs against the
   // whole herd on every farm change rather than only when the setting moves —
@@ -324,6 +356,19 @@ export default function FarmModel() {
     // The pasture stops being a tab stop the instant this lands, so send focus
     // back to the button that armed it rather than dropping it on the body.
     armedFrom.current?.focus();
+  }
+
+  /** Fill every trough or patch of one kind back up to the brim. */
+  function topUp(kind) {
+    const { farm: next, added, filled } = farm.topUp(kind);
+    if (filled === 0) return;
+    setFarm(next);
+    const unit = RESOURCE_KINDS[kind].unit;
+    pushLog(
+      `Topped up ${filled} ${kind} ${filled === 1 ? "source" : "sources"}` +
+      ` — ${Math.round(added)} ${unit} added.`,
+      kind,
+    );
   }
 
   /** Put water or grass wherever the farmer clicked. */
@@ -915,6 +960,29 @@ export default function FarmModel() {
         }
         .fa-yield .item { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
         .fa-yield .none { color: #6b5f42; font-style: italic; }
+        .fa-btn:disabled { opacity: 0.4; cursor: default; }
+        .fa-btn.alt:disabled:hover { background: transparent; }
+        /* Straw, not barn red: a trough getting low is a job to do, not a
+           death in the herd, and the log already keeps red for those. */
+        .fa-low {
+          border-color: #d8b25e;
+          background: #fdf6e4;
+        }
+        .fa-low .lbl { color: #8a5a12; }
+        .fa-low .item { color: #8a5a12; }
+        /* The same warning on the field itself, so the farmer can see which
+           trough it is without reading the panel. */
+        .fa-source.low {
+          box-shadow: 0 0 0 2px rgba(201,138,58,0.9), 0 2px 3px rgba(38,48,26,0.3);
+          animation: lowpulse 1.8s ease-in-out infinite;
+        }
+        @keyframes lowpulse {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(201,138,58,0.9), 0 2px 3px rgba(38,48,26,0.3); }
+          50% { box-shadow: 0 0 0 5px rgba(201,138,58,0.35), 0 2px 3px rgba(38,48,26,0.3); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fa-source.low { animation: none; }
+        }
 
         .fa-add {
           background: white;
@@ -1104,7 +1172,8 @@ export default function FarmModel() {
           {farm.resources.map((source) => (
             <div
               key={source.id}
-              className={`fa-feature fa-source fa-${source.kind}`}
+              className={`fa-feature fa-source fa-${source.kind}` +
+                (source.fullness < lowAt ? " low" : "")}
               title={source.describe()}
               style={{
                 left: `${project(source).x}%`,
@@ -1263,7 +1332,11 @@ export default function FarmModel() {
               <span
                 className="item"
                 key={s.kind}
-                style={{ color: s.volume === 0 ? "#a13c2c" : undefined }}
+                style={{
+                  color: s.volume === 0
+                    ? "#a13c2c"
+                    : lowKinds.has(s.kind) ? "#8a5a12" : undefined,
+                }}
               >
                 {RESOURCE_ICONS[s.kind]} {s.volume} {s.unit}
                 {s.sources > 1 && <span className="none"> ×{s.sources}</span>}
@@ -1282,7 +1355,40 @@ export default function FarmModel() {
                 {RESOURCE_ICONS[kind]} {kind}
               </button>
             ))}
+            <span className="lbl">Top up</span>
+            {["water", "grass"].map((kind) => {
+              // Nothing of that kind in the field, or all of it already full.
+              const spare = farm.resources.some(
+                (r) => r.kind === kind && r.volume < r.capacity,
+              );
+              return (
+                <button
+                  key={kind}
+                  className="fa-btn alt"
+                  // Its own name, sharing none of "💧 water" above: the two
+                  // buttons per kind have to stay tellable apart by anything
+                  // that finds them by their accessible name.
+                  aria-label={`Top up ${kind}`}
+                  disabled={!spare}
+                  onClick={() => topUp(kind)}
+                >
+                  {RESOURCE_ICONS[kind]} +
+                </button>
+              );
+            })}
           </div>
+
+          {lowSources.length > 0 && (
+            <div className="fa-yield fa-low" role="status" aria-live="polite">
+              <span className="lbl">Running low</span>
+              {lowSources.map((s) => (
+                <span className="item" key={s.id}>
+                  {RESOURCE_ICONS[s.kind]} {s.name} — {Math.round(s.volume)} {s.unit}
+                  <span className="none"> ({Math.round(s.fullness * 100)}%)</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {placing && dropAt && (
             <div className="fa-yield">
@@ -1385,6 +1491,20 @@ export default function FarmModel() {
                 onChange={(e) => setCadence(Number(e.target.value))}
               />
               <span className="v">{cadence} {cadence === 1 ? "step" : "steps"}</span>
+            </div>
+
+            <div className="fa-set-row">
+              <span className="l" id="set-low">Warn below</span>
+              <input
+                type="range"
+                min={5}
+                max={75}
+                step={5}
+                value={Math.round(lowAt * 100)}
+                aria-labelledby="set-low"
+                onChange={(e) => setLowAt(Number(e.target.value) / 100)}
+              />
+              <span className="v">{Math.round(lowAt * 100)}%</span>
             </div>
 
             <div className="fa-set-row">

@@ -244,7 +244,11 @@ def check_roaming(page):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://localhost:5173")
+    # A port of its own, bound to v4 and strict: a dev server left running from
+    # some other checkout used to squat :5173 on ::1, `localhost` resolved there
+    # first, and this checked that copy of the app instead of this one — quietly,
+    # and passing. Nothing here says `localhost`.
+    parser.add_argument("--url", default="http://127.0.0.1:5273")
     parser.add_argument("--screenshot", help="write a full-page png here")
     args = parser.parse_args()
 
