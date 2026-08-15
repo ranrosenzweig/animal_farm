@@ -23,7 +23,7 @@ import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
 import { PASTURE, inBounds } from "../src/model/pasture.js";
 import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.js";
-import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
+import { CONTACT_SLOP, GRAVITY, STOPPED, responseTime } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
 import Resource, { setHeldLevels } from "../src/model/Resource.js";
@@ -218,10 +218,9 @@ console.log(`Most any body was carried past its own cruising speed in one step: 
 // spare. If this fails, gravity is too strong for the relief and the slowest
 // species will be stranded on a hillside rather than merely slowed by it.
 {
-  const slowest = SPECIES.reduce((worst, S) =>
-    S.stepSize - GRAVITY * STEEPEST * (2.5 + S.mass / 160)
-      < worst.stepSize - GRAVITY * STEEPEST * (2.5 + worst.mass / 160) ? S : worst);
-  const uphill = slowest.stepSize - GRAVITY * STEEPEST * (2.5 + slowest.mass / 160);
+  const climbRate = (S) => S.stepSize - GRAVITY * STEEPEST * responseTime(S.mass);
+  const slowest = SPECIES.reduce((worst, S) => climbRate(S) < climbRate(worst) ? S : worst);
+  const uphill = climbRate(slowest);
   if (uphill <= STOPPED) {
     fail(`terrain: a ${slowest.species.toLowerCase()} makes ${uphill.toFixed(2)}/step up the ` +
       `steepest ground (${STEEPEST.toFixed(3)}) — it cannot climb it at all`);

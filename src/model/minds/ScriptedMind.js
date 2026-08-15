@@ -13,17 +13,8 @@ export default class ScriptedMind extends Mind {
   /** Deliberate every N steps — a body ticks faster than it changes its mind. */
   static cadence = 12;
 
-  /**
-   * @param {{ cadence?: number, commitment?: number }} [options]
-   *   commitment — how much better a rival goal must score before it wins.
-   */
-  constructor({ cadence, commitment = 0.12 } = {}) {
-    super();
-    this.overrideCadence = cadence;
-    this.commitment = commitment;
-  }
-
-  get cadence() { return this.overrideCadence ?? ScriptedMind.cadence; }
+  /** How much better a rival goal must score before it wins. */
+  commitment = 0.12;
 
   /**
    * @param {import("./Mind.js").Percept} percept

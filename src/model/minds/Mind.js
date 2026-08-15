@@ -27,7 +27,12 @@ export default class Mind {
    */
   static cadence = 1;
 
-  get cadence() { return this.constructor.cadence; }
+  /** @param {{ cadence?: number }} [options] overrides this kind's default. */
+  constructor({ cadence } = {}) {
+    this.overrideCadence = cadence;
+  }
+
+  get cadence() { return this.overrideCadence ?? this.constructor.cadence; }
 
   /**
    * @param {Percept} _percept
