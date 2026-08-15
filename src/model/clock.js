@@ -30,8 +30,19 @@ const LATITUDE = 0.87;
  *
  * It scales what happens next, not what has already happened, so moving it
  * mid-run does not shift the date under a farm that has been going a while.
+ *
+ * What it does *not* scale is the animals: a drive climbs by its own rate per
+ * round, whatever the clock says a round was worth. Winding the day down is
+ * therefore a knob on the sky, not on the farm — the sun tears round and the
+ * herd goes on living at the pace it always did. Two things that are measured
+ * in clock time rather than rounds, the milk in the pail and the rain in the
+ * troughs, are multiplied by this so they keep meaning what they say.
+ *
  * Below about 48 rounds to a day the whole night fits inside one turn of a
- * mind's cadence, and a herd starts sleeping through days at random.
+ * mind's cadence and a herd starts sleeping through days at random; below
+ * about 16 a round is longer than dawn, so the sky jumps from night to day
+ * without passing through either. Both are watchable — neither is a farm to
+ * draw conclusions from.
  */
 let perRound = 1;
 

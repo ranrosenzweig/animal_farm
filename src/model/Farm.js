@@ -637,7 +637,11 @@ export default class Farm {
     let added = 0;
     for (const resource of this.resources) {
       if (resource.kind === "grass" && sky !== "rain") continue;
-      added += resource.refill(precipitation * (resource.kind === "water" ? 0.8 : 0.25));
+      // By the hour, not by the round: an afternoon of rain has to put the
+      // same water in the trough whether the farmer is watching that afternoon
+      // pass in a minute or in four.
+      const fell = precipitation * clockStep() * (resource.kind === "water" ? 0.8 : 0.25);
+      added += resource.refill(fell);
     }
     return added;
   }

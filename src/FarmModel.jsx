@@ -220,6 +220,13 @@ const INK = { grid: "#e6e2d4", axis: "#c9c2ac", muted: "#8a8271" };
 /** How many days of the farm's own history the statistics keep. */
 const RECORDED = 60;
 
+/**
+ * A duration in milliseconds, read as seconds. Rounded to a whole second once
+ * there are several of them, and to a tenth below that — "1s" would be the
+ * same reading across a fourfold change at the fast end of the day slider.
+ */
+const seconds = (ms) => (ms >= 10000 ? Math.round(ms / 1000) : Math.round(ms / 100) / 10);
+
 /** How many log lines are kept, whatever the settings choose to show. */
 const LOG_KEPT = 50;
 const LOG_SHOWN = [8, 20, 50];
@@ -2355,12 +2362,12 @@ export default function FarmModel() {
             <span className="l" id="set-day">A day takes</span>
             <input
               type="range"
-              min={24}
+              min={8}
               max={384}
               step={8}
               value={dayRounds}
               aria-labelledby="set-day"
-              aria-valuetext={`${dayRounds} steps, about ${Math.round((dayRounds * stepMs) / 1000)} seconds`}
+              aria-valuetext={`${dayRounds} steps, about ${seconds(dayRounds * stepMs)} seconds`}
               onChange={(e) => {
                 const rounds = Number(e.target.value);
                 setRoundsPerDay(rounds);
@@ -2371,7 +2378,7 @@ export default function FarmModel() {
                 is what the knob is for, and it moves with the step length too.
                 The step count is in the label for anyone who wants it. */}
             <span className="v" title={`${dayRounds} steps to a day`}>
-              {Math.round((dayRounds * stepMs) / 1000)}s
+              {seconds(dayRounds * stepMs)}s
             </span>
           </div>
 
