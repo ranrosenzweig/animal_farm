@@ -94,6 +94,13 @@ export default class Animal {
   static nocturnal = false;
 
   /**
+   * @type {number} How many legs it stands on. Four unless it is a bird, which
+   * is the only reason this is worth writing down: the UI walks them, and a
+   * duck on four legs is a duck nobody believes.
+   */
+  static legs = 4;
+
+  /**
    * @type {boolean} Whether deep water is ground to this kind. Almost nothing
    * on a farm can cross a pond, so the default is to be stopped by one exactly
    * as by a rock — a cow walks round the water it drinks from.
@@ -227,6 +234,7 @@ export default class Animal {
   get stepSize() { return this.constructor.stepSize; }
   get mass() { return this.constructor.mass; }
   get turnRate() { return this.constructor.turnRate; }
+  get legs() { return this.constructor.legs; }
   get affinities() { return this.constructor.affinities; }
 
   /**

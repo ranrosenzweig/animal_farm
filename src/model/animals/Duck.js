@@ -11,6 +11,7 @@ export default class Duck extends Animal {
   static stepSize = 2.8;   // an unhurried waddle
   static mass = 3;         // light enough to be knocked clean across the field
   static radius = 4.5;
+  static legs = 2;          // a bird
   static turnRate = 0.45;  // waddles round quickly enough
   static swims = true;     // the one thing here that crosses a pond rather than skirting it
 

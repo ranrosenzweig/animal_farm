@@ -3,6 +3,7 @@ import Farm from "./model/Farm.js";
 import { SPECIES, speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
+import { STOPPED } from "./model/physics.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import {
   RESOURCE_KINDS, heldLevels, setHeldLevels, setStockFloor, stockFloor,
@@ -1077,13 +1078,14 @@ export default function FarmModel() {
             top var(--step-duration, 600ms) linear;
         }
         @media (prefers-reduced-motion: reduce) {
-          .fa-sprite, .fa-sprite .emoji { transition: none; animation: none; }
+          .fa-sprite, .fa-sprite .emoji, .fa-sprite .legs i { transition: none; animation: none; }
         }
         /* The same stillness, asked for by hand rather than by the system —
            for a farmer whose OS says nothing but who wants the field to hold
            still while they read it. Animals still move; they just cut. */
         .farm-app.calm .fa-sprite,
         .farm-app.calm .fa-sprite .emoji,
+        .farm-app.calm .fa-sprite .legs i,
         .farm-app.calm .fa-bubble,
         .farm-app.calm .fa-aim { transition: none; animation: none; }
         /* Only the animal takes the depth, not its name tag: a tag scaled down
@@ -1100,6 +1102,46 @@ export default function FarmModel() {
           /* Its feet are what stand on the ground, so scale from there. */
           transform-origin: 50% 100%;
           transition: transform var(--step-duration, 600ms) linear;
+        }
+        /* Legs. The glyphs are drawn standing still, so each animal gets a set
+           of its own underneath — four posts that swing while it is walking
+           and stand under it when it is not. Sized in em, so a newborn on its
+           smaller type gets smaller legs without being told. Behind the glyph,
+           by the same negative z-index trick the shade uses. */
+        .fa-sprite .legs {
+          position: absolute;
+          left: 50%;
+          /* Below the glyph's own feet, not behind its body: an emoji animal is
+             drawn solid, so legs tucked up inside it are legs nobody can see. */
+          bottom: -0.13em;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 0.17em;
+          z-index: -1;
+        }
+        .fa-sprite .legs i {
+          display: block;
+          width: 0.08em;
+          height: 0.24em;
+          background: linear-gradient(180deg, #6b5236 0%, #3f3020 100%);
+          border-radius: 0 0 0.04em 0.04em;
+          /* Swings from the shoulder, which is the top of the post. */
+          transform-origin: 50% 0;
+        }
+        /* Diagonal pairs move together, the way a walking quadruped does: near
+           fore with off hind, so legs one and four swing against two and three.
+           On a two-legged bird the same rule just alternates them. */
+        .fa-sprite.walking .legs i {
+          animation: stride var(--stride, 800ms) ease-in-out infinite;
+        }
+        .fa-sprite.walking .legs i:nth-child(2),
+        .fa-sprite.walking .legs i:nth-child(3) {
+          animation-delay: calc(var(--stride, 800ms) / -2);
+        }
+        @keyframes stride {
+          0%   { transform: rotate(20deg); }
+          50%  { transform: rotate(-20deg); }
+          100% { transform: rotate(20deg); }
         }
         /* The patch of shade an animal stands in. Painted behind the emoji
            itself — a negative z-index child draws under its parent's text. */
@@ -2066,8 +2108,16 @@ export default function FarmModel() {
           {farm.animals.map((a) => (
             <button
               key={a.id}
-              className={"fa-sprite" + (a.id === selected?.id ? " selected" : "")}
-              style={standing(a)}
+              className={"fa-sprite" + (a.id === selected?.id ? " selected" : "")
+                + (a.speed > STOPPED ? " walking" : "")}
+              style={{
+                ...standing(a),
+                // A stride takes as long as it takes: an animal at its cruising
+                // speed swings its legs once a step, and one labouring uphill
+                // or through mud swings them slower, because it is the same
+                // legs covering less ground.
+                "--stride": `${Math.round(Math.min(1400, (stepMs * 1.6 * a.stepSize) / Math.max(a.speed, 0.2)))}ms`,
+              }}
               onClick={(event) => {
                 // While placing, let the click through to the pasture beneath.
                 if (placing) return;
@@ -2085,6 +2135,9 @@ export default function FarmModel() {
               {/* Newborns are visibly smaller until they grow up. */}
               <span className="emoji" style={a.isAdult ? undefined : { fontSize: "18px" }}>
                 <span className="shade" aria-hidden="true" />
+                <span className="legs" aria-hidden="true">
+                  {Array.from({ length: a.legs }, (_, i) => <i key={i} />)}
+                </span>
                 {a.emoji}
                 {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
