@@ -16,6 +16,7 @@ import { SPECIES } from "../src/model/species.js";
 import Resource from "../src/model/Resource.js";
 import { DRIVES } from "../src/model/drives.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
+import { roundsPerDay } from "../src/model/clock.js";
 
 const number = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
@@ -48,6 +49,14 @@ const openingStock = farm.stock();
 const range = Object.fromEntries(DRIVES.map((d) => [d, { min: 1, max: 0 }]));
 const pinned = Object.fromEntries(DRIVES.map((d) => [d, 0]));
 const goalSteps = Object.fromEntries(GOAL_NAMES.map((g) => [g, 0]));
+// The same tally again, counting only the steps taken after dark. A run of a
+// few hundred steps now spans several days and nights, and "35% resting" means
+// nothing until you know whether that was the night doing its work.
+const darkGoalSteps = Object.fromEntries(GOAL_NAMES.map((g) => [g, 0]));
+const opened = farm.clock;
+const seasons = new Set();
+const wetDays = new Set();
+let darkSteps = 0;
 const causes = new Map();
 let animalSteps = 0;
 let births = 0;
@@ -60,9 +69,17 @@ let worstOverlapAt = null;
 let emptiedAt = null;
 
 for (let step = 1; step <= STEPS; step++) {
+  const sky = farm.clock;
+  seasons.add(sky.season);
+  if (sky.precipitation >= 0.05) wetDays.add(sky.day);
+
   for (const animal of farm.animals) {
     animalSteps += 1;
     goalSteps[animal.goal] = (goalSteps[animal.goal] ?? 0) + 1;
+    if (!sky.daylight) {
+      darkSteps += 1;
+      darkGoalSteps[animal.goal] = (darkGoalSteps[animal.goal] ?? 0) + 1;
+    }
     for (const drive of DRIVES) {
       const level = animal.drives[drive];
       range[drive].min = Math.min(range[drive].min, level);
@@ -99,7 +116,14 @@ for (let step = 1; step <= STEPS; step++) {
 
 /* ------------------------------------------------------------------ */
 
-console.log(`${STEPS} steps · ${HERD} of each species · sources ${STOCKED ? "topped up each round" : "not replenished"}\n`);
+console.log(`${STEPS} steps · ${HERD} of each species · sources ${STOCKED ? "topped up each round" : "not replenished"}`);
+
+const closed = farm.clock;
+const darkShare = animalSteps === 0 ? 0 : darkSteps / animalSteps;
+console.log(`  opened day ${opened.day} ${opened.time}, closed day ${closed.day} ${closed.time}` +
+  ` — ${(STEPS / roundsPerDay()).toFixed(1)} days of ${[...seasons].join(" into ")}`);
+console.log(`  ${pct(darkShare)} of it after dark · ` +
+  `rain or snow fell on ${wetDays.size} of those days\n`);
 
 console.log("Drive ranges across every animal:");
 for (const drive of DRIVES) {
@@ -112,7 +136,13 @@ for (const drive of DRIVES) {
 console.log(`\nWhat they spent their time on (${animalSteps} animal-steps):`);
 for (const [goal, steps] of Object.entries(goalSteps).sort((a, b) => b[1] - a[1])) {
   const share = animalSteps === 0 ? 0 : steps / animalSteps;
-  console.log(`  ${goal.padEnd(8)} ${String(steps).padStart(6)}  ${pct(share).padStart(4)}`);
+  // What share of *this goal* was pursued after dark, against the share of the
+  // whole run that was dark. Above that line is a night-time habit, below it a
+  // daylight one — which is the only way to read the split without knowing how
+  // long the nights were.
+  const night = steps === 0 ? 0 : darkGoalSteps[goal] / steps;
+  const lean = steps === 0 ? "" : `  after dark ${pct(night).padStart(4)}`;
+  console.log(`  ${goal.padEnd(8)} ${String(steps).padStart(6)}  ${pct(share).padStart(4)}${lean}`);
 }
 
 console.log("\nPopulation:");
@@ -183,6 +213,16 @@ const wanted = new Set(SPECIES.flatMap((S) => Object.entries(S.affinities).filte
 for (const goal of GOAL_NAMES) {
   if (goalSteps[goal] === 0 && wanted.has(goal) && !(goal === "mate" && !canMate)) {
     warnings.push(`no animal ever chose "${goal}", though some species have an affinity for it`);
+  }
+}
+// The night is supposed to settle the herd. If as much of the resting happened
+// in daylight as after dark, whatever is meant to be putting them down isn't.
+if (darkSteps > 50 && animalSteps - darkSteps > 50) {
+  const restAtNight = darkGoalSteps.rest / darkSteps;
+  const restByDay = (goalSteps.rest - darkGoalSteps.rest) / (animalSteps - darkSteps);
+  if (restAtNight <= restByDay) {
+    warnings.push(`the herd rested no more after dark (${pct(restAtNight)}) than in daylight ` +
+      `(${pct(restByDay)}) — the night is not settling anyone`);
   }
 }
 if (animalSteps > 0 && closestTie < 0.5) {
