@@ -56,6 +56,7 @@ let closestTie = 0;
 let contests = 0;
 let knownRivals = 0;   // contests between animals that already knew each other
 let worstOverlap = 0;
+let worstOverlapAt = null;
 let emptiedAt = null;
 
 for (let step = 1; step <= STEPS; step++) {
@@ -70,7 +71,19 @@ for (let step = 1; step <= STEPS; step++) {
     }
     closestTie = Math.max(closestTie, 0, ...animal.bonds.values());
   }
-  worstOverlap = Math.max(worstOverlap, farm.overlaps().length);
+  // Rare — about one run in fourteen — and `npm run check` does not reproduce
+  // it, so the only way to learn anything is to record who and when the once
+  // it happens rather than just that it did.
+  const overlapping = farm.overlaps();
+  if (overlapping.length > worstOverlap) {
+    worstOverlap = overlapping.length;
+    worstOverlapAt = {
+      step,
+      who: overlapping.map(([a, b]) =>
+        `${a.name} the ${a.species} (${a.x.toFixed(1)}, ${a.y.toFixed(1)}) and ` +
+        `${b.name} the ${b.species} (${b.x.toFixed(1)}, ${b.y.toFixed(1)})`),
+    };
+  }
 
   const settled = farm.stepAll();
   const { farm: next, born, died } = settled;
@@ -136,9 +149,30 @@ console.log(`  closed  ${farm.stock().map((s) => `${s.label} ${s.volume}${s.unit
 /* ------------------------------------------------------------------ */
 
 const warnings = [];
+// Some of what this run can show is decided before it starts. A mate must be
+// the same species, so one of each is a field where nobody has a partner and
+// `urge` cannot come down; unreplenished sources mean the food is gone by the
+// end and hunger cannot either. Reporting those as findings sends the reader
+// after a balance problem the setup guaranteed, so they are said plainly and
+// kept out of the warnings.
+const givens = [];
+const canMate = HERD >= 2;
+if (!canMate) {
+  givens.push(`a mate must be the same species and this run has ${HERD} of each, ` +
+    `so no animal had a possible partner — "urge" and "mate" say nothing here`);
+}
+if (!STOCKED) {
+  givens.push("sources were not replenished, so the field runs out and the drives " +
+    "that feed on it pin by design — pass --stocked to measure balance instead");
+}
+
+const explained = (drive) =>
+  (drive === "urge" && !canMate) ||
+  (!STOCKED && (drive === "hunger" || drive === "thirst"));
+
 for (const drive of DRIVES) {
   const share = animalSteps === 0 ? 0 : pinned[drive] / animalSteps;
-  if (share > 0.25) {
+  if (share > 0.25 && !explained(drive)) {
     warnings.push(`${drive} sat at 100% for ${pct(share)} of the run — nothing is relieving it often enough`);
   }
   if (range[drive].max < 0.3) {
@@ -147,7 +181,7 @@ for (const drive of DRIVES) {
 }
 const wanted = new Set(SPECIES.flatMap((S) => Object.entries(S.affinities).filter(([, a]) => a > 0).map(([g]) => g)));
 for (const goal of GOAL_NAMES) {
-  if (goalSteps[goal] === 0 && wanted.has(goal)) {
+  if (goalSteps[goal] === 0 && wanted.has(goal) && !(goal === "mate" && !canMate)) {
     warnings.push(`no animal ever chose "${goal}", though some species have an affinity for it`);
   }
 }
@@ -162,8 +196,20 @@ if (farm.size > 0) {
     warnings.push(`one animal holds ${most} ties in a herd of ${farm.size} — the departed are not being forgotten`);
   }
 }
-if (worstOverlap > 0) warnings.push(`${worstOverlap} overlapping pairs seen — the no-overlap rule is broken`);
-if (emptiedAt !== null) warnings.push(`the farm emptied at step ${emptiedAt}`);
+if (worstOverlap > 0) {
+  warnings.push(`${worstOverlap} overlapping pairs seen — the no-overlap rule is broken. ` +
+    `First at step ${worstOverlapAt.step}: ${worstOverlapAt.who.join("; ")}`);
+}
+// A farm with nothing growing back is meant to end empty; that it did is only
+// news when the sources were being kept full.
+if (emptiedAt !== null) {
+  (STOCKED ? warnings : givens).push(`the farm emptied at step ${emptiedAt}`);
+}
+
+if (givens.length > 0) {
+  console.log("\nThis run could not have shown otherwise:");
+  for (const given of givens) console.log(`  · ${given}`);
+}
 
 console.log("");
 if (warnings.length === 0) {
