@@ -7,7 +7,7 @@ import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
 } from "./physics.js";
-import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
+import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
 import { OPENING, clockAt, clockStep } from "./clock.js";
 
 /**
@@ -640,6 +640,22 @@ export default class Farm {
   }
 
   /**
+   * The farmer's standing order, carried out: every source topped back up to
+   * the floor they set, however much the herd drank. Off at zero, which is how
+   * the farm runs unless somebody says otherwise — a trough that empties is
+   * meant to be a chore, and this is the setting that says it isn't.
+   * @private
+   */
+  keepStocked() {
+    const floor = stockFloor();
+    if (floor <= 0) return;
+    for (const resource of this.resources) {
+      const short = resource.capacity * floor - resource.volume;
+      if (short > 0) resource.refill(short);
+    }
+  }
+
+  /**
    * The farm as it stands after a round: the young are on the field, the dead
    * are off it, the drained sources are gone, and a quarter of an hour has
    * passed. Every round goes through here, so this is the only place the clock
@@ -648,6 +664,7 @@ export default class Farm {
    */
   settled(born = []) {
     this.water();
+    this.keepStocked();
     return new Farm(
       this.name,
       [...this.animals.filter((a) => a.isAlive()), ...born],
