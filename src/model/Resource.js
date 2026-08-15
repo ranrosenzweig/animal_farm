@@ -7,6 +7,17 @@ import { nextId } from "./random.js";
  * patch of grass it eats. Drawing from one lowers its volume, and nothing
  * refills it on its own — the farmer has to put more down.
  */
+
+/**
+ * The farmer's standing order: never let a source fall below this share of
+ * its capacity, whatever the animals take out of it. Zero is off, and off is
+ * how the farm has always run — sources drain, and refilling them is a chore.
+ */
+let floor = 0;
+
+export const stockFloor = () => floor;
+
+export const setStockFloor = (share) => { floor = Math.min(1, Math.max(0, share)); };
 export const RESOURCE_KINDS = {
   water: {
     kind: "water",

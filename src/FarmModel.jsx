@@ -1,11 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
-import { speciesNamed } from "./model/species.js";
+import { SPECIES, speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
-import { RESOURCE_KINDS } from "./model/Resource.js";
-import { hhmm, roundsPerDay, setRoundsPerDay } from "./model/clock.js";
+import { RESOURCE_KINDS, setStockFloor, stockFloor } from "./model/Resource.js";
+import {
+  DAYS_PER_YEAR, STEPS_PER_DAY, STEPS_PER_HOUR, clockAt, hhmm, roundsPerDay, setRoundsPerDay,
+} from "./model/clock.js";
 import ScriptedMind from "./model/minds/ScriptedMind.js";
 import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
@@ -191,8 +193,30 @@ const MINDS = {
  */
 const TABS = [
   { id: "pasture", label: "Pasture" },
+  { id: "stats", label: "Statistics" },
   { id: "desk", label: "Settings & log" },
 ];
+
+/**
+ * The chart palette: six categorical slots, handed to species in registry
+ * order and never by rank, so a species keeps its colour whatever the herd
+ * does to its share of the bar.
+ *
+ * These are deliberately *not* the species' own accent colours. Those are two
+ * browns, a grey and a pink — as a set they fail colour-blind separation
+ * outright (worst adjacent pair ΔE 9.3 against a floor of 15, and half of them
+ * read as grey), which is fine for a dot beside a name and useless for
+ * segments stacked against each other. The emoji in the legend is what ties a
+ * band of colour back to its pen.
+ */
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
+const COLOR_OF = new Map(SPECIES.map((Species, i) => [Species.species, SERIES[i % SERIES.length]]));
+
+/** Chart chrome. Recessive by design: the data is the only loud thing. */
+const INK = { grid: "#e6e2d4", axis: "#c9c2ac", muted: "#8a8271" };
+
+/** How many days of the farm's own history the statistics keep. */
+const RECORDED = 60;
 
 /** How many log lines are kept, whatever the settings choose to show. */
 const LOG_KEPT = 50;
@@ -241,6 +265,97 @@ function driveColor(level) {
  * read off the model — the head counts, the attribute card, the daily
  * yield and the source panel all come from the classes in src/model.
  */
+/**
+ * A column chart, one column per record, each column a stack of segments.
+ *
+ * Plain elements rather than SVG: a flex row gets the 2px gap between columns
+ * and between stacked segments exactly right at any width, which is the one
+ * piece of chart anatomy that has to be pixels rather than a share of the box.
+ *
+ * The gap comes off at hairline density — a year of days is 365 columns, and
+ * 2px between each of them is wider than the chart. Bars that thin read as a
+ * dense histogram, where the separation the gap buys is not on offer anyway.
+ *
+ * @param {{ rows: { key: string, title: string, parts: { key: string, value: number, color: string }[] }[] }} props
+ */
+function Columns({ rows, max, height = 88, gap = 2, label, empty = "nothing recorded yet" }) {
+  if (rows.length === 0) return <div className="fa-chart-empty" style={{ height }}>{empty}</div>;
+  const ceiling = max > 0 ? max : 1;
+  return (
+    // One label for the whole chart rather than 365 tab stops: the numbers a
+    // reader actually needs are beside it in text either way.
+    <div className="fa-cols" style={{ height, gap }} role="img" aria-label={label}>
+      {rows.map((row) => (
+        <div className="col" key={row.key} title={row.title}>
+          {row.parts.map((part) => (
+            <span
+              key={part.key}
+              style={{
+                height: `${Math.max(part.value > 0 ? 1.5 : 0, (part.value / ceiling) * 100)}%`,
+                background: part.color,
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One line over a stretch of days, with the area under it washed in. Drawn in
+ * day units and stretched to the box, so the stroke is pinned to real pixels
+ * with `non-scaling-stroke` rather than being squashed with the geometry.
+ */
+function Trace({ points, low, high, color, height = 88, zero = null }) {
+  const span = high - low || 1;
+  const at = (value) => ((high - value) / span) * 100;
+  const line = points.map((p, i) => `${i},${at(p)}`).join(" ");
+  return (
+    <svg
+      className="fa-trace"
+      style={{ height }}
+      viewBox={`0 0 ${points.length - 1} 100`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <polygon fill={color} fillOpacity="0.13" points={`0,100 ${line} ${points.length - 1},100`} />
+      {zero != null && zero > low && zero < high && (
+        <line
+          x1="0" x2={points.length - 1} y1={at(zero)} y2={at(zero)}
+          stroke={INK.axis} strokeWidth="1" vectorEffect="non-scaling-stroke"
+        />
+      )}
+      <polyline
+        fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke" points={line}
+      />
+    </svg>
+  );
+}
+
+/**
+ * A row of season labels under a chart that spans the whole year, each as wide
+ * as its season is long. Built by walking the year rather than from a list of
+ * four, because the year opens in January and so begins and ends in the same
+ * winter — five bands, not four.
+ */
+function SeasonAxis({ year }) {
+  const bands = [];
+  for (const day of year) {
+    const last = bands[bands.length - 1];
+    if (last && last.season === day.season) last.days += 1;
+    else bands.push({ season: day.season, days: 1 });
+  }
+  return (
+    <div className="fa-seasons">
+      {bands.map((band, i) => (
+        <span key={i} style={{ flex: band.days }}>{band.days > 40 ? band.season : ""}</span>
+      ))}
+    </div>
+  );
+}
+
 export default function FarmModel() {
   const [farm, setFarm] = useState(() => Farm.starter("The Farm Registry"));
   const [selectedId, setSelectedId] = useState(() => null);
@@ -266,6 +381,8 @@ export default function FarmModel() {
   const [calm, setCalm] = useState(false);
   const [logLines, setLogLines] = useState(LOG_SHOWN[0]);
   const [lowAt, setLowAt] = useState(LOW_AT);
+  /** Never let a source fall below this share of capacity. 0 is off. */
+  const [keepAt, setKeepAt] = useState(() => Math.round(stockFloor() * 100));
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const companions = selected ? farm.companionsOf(selected) : [];
@@ -281,6 +398,94 @@ export default function FarmModel() {
   const lowSources = farm.resources.filter((r) => !r.depleted && r.fullness < lowAt);
   const lowKinds = new Set(lowSources.map((r) => r.kind));
   const expecting = farm.animals.filter((a) => a.isPregnant).length;
+
+  /**
+   * The weather of a whole year, a day at a time. It is worked out rather than
+   * remembered — the clock answers for any day without the farm having lived
+   * it — so this runs once and never again.
+   */
+  const year = useMemo(() => {
+    const days = [];
+    for (let day = 0; day < DAYS_PER_YEAR; day++) {
+      let warmth = 0;
+      let wettest = 0;
+      let wetHours = 0;
+      let sky = "clear";
+      for (let hour = 0; hour < 24; hour++) {
+        const at = clockAt(day * STEPS_PER_DAY + hour * STEPS_PER_HOUR);
+        warmth += at.tempC;
+        if (at.precipitation >= 0.05) {
+          wetHours += 1;
+          if (at.precipitation > wettest) {
+            wettest = at.precipitation;
+            sky = at.sky;
+          }
+        }
+        if (hour === 12) days.push({ day, season: at.season, daylength: at.daylength });
+      }
+      Object.assign(days[days.length - 1], {
+        tempC: warmth / 24, wetHours, wettest, sky,
+      });
+    }
+    return days;
+  }, []);
+
+  /**
+   * What the farm looked like at the turn of each day. The weather can be
+   * recomputed from the clock at any time; a head count cannot — it only
+   * exists because this farm lived that day, so it has to be written down as
+   * it happens.
+   */
+  const history = useRef([]);
+  useEffect(() => {
+    const day = farm.clock.day;
+    const last = history.current[history.current.length - 1];
+    if (last && last.day === day) return;
+    history.current = [
+      ...history.current.slice(1 - RECORDED),
+      {
+        day,
+        season: farm.clock.season,
+        counts: Object.fromEntries(farm.census().map((pen) => [pen.species, pen.count])),
+        head: farm.size,
+        stock: Object.fromEntries(farm.stock().map((s) => [s.kind, s.volume])),
+      },
+    ];
+  }, [farm]);
+
+  /* What the statistics draw. Everything here is worked out on the way past —
+     the only thing kept is the day-by-day record above. */
+  const recorded = history.current;
+  const herdMax = Math.max(1, ...recorded.map((r) => r.head));
+  const herdRows = recorded.map((r) => ({
+    key: r.day,
+    title: `Day ${r.day}: ${r.head} head — ${Object.entries(r.counts)
+      .filter(([, n]) => n > 0)
+      .map(([species, n]) => `${n} ${species.toLowerCase()}`)
+      .join(", ") || "nobody left"}`,
+    parts: SPECIES
+      .map((Species) => ({
+        key: Species.species,
+        value: r.counts[Species.species] ?? 0,
+        color: COLOR_OF.get(Species.species),
+      }))
+      .filter((part) => part.value > 0),
+  }));
+  const stockMax = Object.fromEntries(stock.map((s) => [
+    s.kind, Math.max(1, ...recorded.map((r) => r.stock[s.kind] ?? 0)),
+  ]));
+  const warmest = Math.max(...year.map((d) => d.tempC));
+  const coldest = Math.min(...year.map((d) => d.tempC));
+  const wettest = Math.max(1, ...year.map((d) => d.wetHours));
+  const seasonSummary = ["winter", "spring", "summer", "autumn"].map((season) => {
+    const days = year.filter((d) => d.season === season);
+    return {
+      season,
+      tempC: days.reduce((t, d) => t + d.tempC, 0) / days.length,
+      wetDays: days.filter((d) => d.wetHours > 0).length,
+      daylength: days.reduce((t, d) => t + d.daylength, 0) / days.length,
+    };
+  });
 
   // Farm.stepAll() walks the animals as a side effect, so the roam timer reads
   // the current farm through a ref rather than a state updater — React invokes
@@ -1312,6 +1517,140 @@ export default function FarmModel() {
         /* No longer a disclosure: the tab it sits behind is the disclosure, and
            a shut panel inside a tab the farmer chose is a second door for
            nothing. */
+        /* ---- Statistics ------------------------------------------------
+           Charts are thin marks on a quiet card: hairline axes, no gridlines
+           to speak of, and every gap between marks is 2px of surface rather
+           than a drawn border. */
+        .fa-card {
+          background: white;
+          border: 1px solid #ddd;
+          border-radius: 8px;
+          padding: 12px 14px 10px;
+        }
+        .fa-card-title {
+          font-size: 11px;
+          letter-spacing: 0.09em;
+          text-transform: uppercase;
+          color: #6b5f42;
+          display: flex;
+          gap: 10px;
+          align-items: baseline;
+          margin-bottom: 10px;
+        }
+        .fa-card-title .note {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          letter-spacing: 0;
+          text-transform: none;
+          color: ${INK.muted};
+          margin-left: auto;
+        }
+        /* One column per day, each a stack of species. The gaps are the
+           separation — nothing is outlined. */
+        .fa-cols { display: flex; align-items: flex-end; gap: 2px; }
+        .fa-cols .col {
+          flex: 1 1 0;
+          min-width: 0;
+          height: 100%;
+          display: flex;
+          flex-direction: column-reverse;
+          gap: 2px;
+          justify-content: flex-start;
+        }
+        .fa-cols .col span { display: block; border-radius: 1px; }
+        .fa-cols .col span:last-child { border-radius: 3px 3px 1px 1px; }
+        .fa-chart-empty {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11.5px;
+          font-style: italic;
+          color: ${INK.muted};
+        }
+        .fa-trace { display: block; width: 100%; }
+        .fa-axis {
+          display: flex;
+          justify-content: space-between;
+          border-top: 1px solid ${INK.axis};
+          margin-top: 4px;
+          padding-top: 3px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 9.5px;
+          color: ${INK.muted};
+        }
+        .fa-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+        .fa-legend .key {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 11.5px;
+          color: #52514e;
+        }
+        .fa-legend .key i { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+        .fa-legend .key b { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
+        /* A chart with its name and its ceiling down the left, so the number
+           is readable without hunting for a tooltip. */
+        .fa-pair { display: flex; align-items: stretch; gap: 10px; margin-bottom: 8px; }
+        .fa-pair .side {
+          width: 104px;
+          flex-shrink: 0;
+          font-size: 11.5px;
+          color: #52514e;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 2px;
+        }
+        .fa-pair .side b {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10.5px;
+          color: ${INK.muted};
+          font-weight: 600;
+        }
+        .fa-pair .fa-cols, .fa-pair .fa-plot { flex: 1; min-width: 0; }
+        .fa-plot { position: relative; }
+        /* Where the farm is standing in its own year. */
+        .fa-plot .today {
+          position: absolute;
+          top: 0; bottom: 0;
+          width: 1px;
+          background: var(--barn-red);
+          opacity: 0.75;
+        }
+        .fa-seasons {
+          display: flex;
+          gap: 2px;
+          margin: 2px 0 10px 114px;
+          font-size: 10px;
+          color: ${INK.muted};
+          text-transform: capitalize;
+        }
+        .fa-seasons span {
+          text-align: center;
+          border-top: 1px solid ${INK.grid};
+          padding-top: 3px;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .fa-tiles { display: flex; gap: 8px; flex-wrap: wrap; }
+        .fa-tiles .tile {
+          flex: 1 1 120px;
+          border: 1px solid ${INK.grid};
+          border-radius: 6px;
+          padding: 7px 9px;
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .fa-tiles .lbl {
+          font-size: 10px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: ${INK.muted};
+        }
+        .fa-tiles .big { font-size: 19px; color: #3a2f1c; }
+        .fa-tiles .sub { font-size: 10.5px; color: #6b5f42; }
+
         .fa-settings {
           background: white;
           border: 1px solid #ddd;
@@ -1876,6 +2215,107 @@ export default function FarmModel() {
       </div>
       )}
 
+      {tab === "stats" && (
+      <div
+        className="fa-body fa-desk"
+        id="fa-view-stats"
+        role="tabpanel"
+        aria-labelledby="fa-tab-stats"
+      >
+        <div className="fa-card">
+          <div className="fa-card-title">
+            The herd, at the turn of each day
+            <span className="note">{recorded.length ? `days ${recorded[0].day}–${recorded[recorded.length - 1].day}` : ""}</span>
+          </div>
+          <Columns
+            rows={herdRows}
+            max={herdMax}
+            label={`Head count at the turn of each of the last ${recorded.length} days, stacked by species. ${herdMax} head at the fullest.`}
+            empty="nothing counted yet — let them roam through a night"
+          />
+          <div className="fa-axis">
+            <span>{recorded.length ? `day ${recorded[0].day}` : ""}</span>
+            <span>{herdMax} head at the fullest</span>
+          </div>
+          {/* Not colour alone: every band is named, with its own count beside
+              it, and the emoji is the same one on the pen above. */}
+          <div className="fa-legend">
+            {census.map((pen) => (
+              <span className="key" key={pen.species}>
+                <i style={{ background: COLOR_OF.get(pen.species) }} />
+                {pen.emoji} {pen.species} <b>{pen.count}</b>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Two charts, not one with two scales: litres and kilogrammes share
+            no axis, and laying them over each other would invent a comparison
+            the field never made. */}
+        <div className="fa-card">
+          <div className="fa-card-title">In the field, at the turn of each day</div>
+          {stock.map((s) => (
+            <div className="fa-pair" key={s.kind}>
+              <span className="side">{RESOURCE_ICONS[s.kind]} {s.label}<b>{stockMax[s.kind]} {s.unit}</b></span>
+              <Columns
+                rows={recorded.map((r) => ({
+                  key: r.day,
+                  title: `Day ${r.day}: ${r.stock[s.kind]} ${s.unit} of ${s.kind}`,
+                  parts: [{ key: s.kind, value: r.stock[s.kind], color: SERIES[s.kind === "water" ? 0 : 5] }],
+                }))}
+                max={stockMax[s.kind]}
+                height={54}
+                label={`${s.label} in the field at the turn of each of the last ${recorded.length} days, ${stockMax[s.kind]} ${s.unit} at the fullest.`}
+                empty="nothing recorded yet"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="fa-card">
+          <div className="fa-card-title">
+            The year <span className="note">day {clock.dayOfYear + 1} of {DAYS_PER_YEAR} · {clock.season}</span>
+          </div>
+          <div className="fa-pair">
+            <span className="side">🌡 Temperature<b>{Math.round(coldest)}–{Math.round(warmest)}°C</b></span>
+            <div className="fa-plot">
+              <Trace points={year.map((d) => d.tempC)} low={coldest} high={warmest} zero={0} color={SERIES[1]} />
+              <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
+            </div>
+          </div>
+          <div className="fa-pair">
+            <span className="side">🌧 Rain<b>{wettest} h/day</b></span>
+            <div className="fa-plot">
+              <Columns
+                rows={year.map((d) => ({
+                  key: d.day,
+                  title: `Day ${d.day + 1} (${d.season}): ${d.wetHours
+                    ? `${d.wetHours} h of ${d.sky}, ${Math.round(d.wettest * 100)}% at its heaviest`
+                    : "dry"}`,
+                  parts: [{ key: "wet", value: d.wetHours, color: SERIES[0] }],
+                }))}
+                max={wettest}
+                height={54}
+                gap={0}
+                label={`Hours of rain or snow on each day of the year, up to ${wettest} in a day. Wettest in autumn, driest in summer.`}
+              />
+              <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
+            </div>
+          </div>
+          <SeasonAxis year={year} />
+          <div className="fa-tiles">
+            {seasonSummary.map((s) => (
+              <div className="tile" key={s.season}>
+                <span className="lbl">{s.season}</span>
+                <span className="big">{Math.round(s.tempC)}°C</span>
+                <span className="sub">{s.wetDays} wet days · {s.daylength.toFixed(1)} h light</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      )}
+
       {tab === "desk" && (
       <div
         className="fa-body fa-desk"
@@ -1926,6 +2366,28 @@ export default function FarmModel() {
             <span className="v" title={`${dayRounds} steps to a day`}>
               {Math.round((dayRounds * stepMs) / 1000)}s
             </span>
+          </div>
+
+          {/* The standing order that turns the troughs from a chore into
+              scenery: at anything above off, no source falls below this share
+              of full, however much the herd drinks. */}
+          <div className="fa-set-row">
+            <span className="l" id="set-keep">Keep stocked</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={keepAt}
+              aria-labelledby="set-keep"
+              aria-valuetext={keepAt === 0 ? "off" : `never below ${keepAt}% of capacity`}
+              onChange={(e) => {
+                const share = Number(e.target.value);
+                setStockFloor(share / 100);
+                setKeepAt(share);
+              }}
+            />
+            <span className="v">{keepAt === 0 ? "off" : `≥ ${keepAt}%`}</span>
           </div>
 
           <div className="fa-set-row">
