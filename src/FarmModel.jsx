@@ -4,7 +4,9 @@ import { SPECIES, speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
-import { RESOURCE_KINDS, setStockFloor, stockFloor } from "./model/Resource.js";
+import {
+  RESOURCE_KINDS, heldLevels, setHeldLevels, setStockFloor, stockFloor,
+} from "./model/Resource.js";
 import {
   DAYS_PER_YEAR, STEPS_PER_DAY, STEPS_PER_HOUR, clockAt, hhmm, roundsPerDay, setRoundsPerDay,
 } from "./model/clock.js";
@@ -383,6 +385,8 @@ export default function FarmModel() {
   const [lowAt, setLowAt] = useState(LOW_AT);
   /** Never let a source fall below this share of capacity. 0 is off. */
   const [keepAt, setKeepAt] = useState(() => Math.round(stockFloor() * 100));
+  /** Whether the levels are pinned where they stand. Lives in the model. */
+  const [held, setHeld] = useState(heldLevels);
 
   const selected = farm.find(selectedId) ?? farm.animals[0];
   const companions = selected ? farm.companionsOf(selected) : [];
@@ -1919,7 +1923,10 @@ export default function FarmModel() {
                     // buttons per kind have to stay tellable apart by anything
                     // that finds them by their accessible name.
                     aria-label={`Top up ${kind}`}
-                    disabled={!spare}
+                    // Held levels do not take a top-up, so the button says so
+                    // rather than looking broken.
+                    disabled={!spare || held}
+                    title={held ? "Levels are held — nothing goes in or out" : undefined}
                     onClick={() => topUp(kind)}
                   >
                     {RESOURCE_ICONS[kind]} +
@@ -2449,6 +2456,20 @@ export default function FarmModel() {
             <label>
               <input type="checkbox" checked={calm} onChange={(e) => setCalm(e.target.checked)} />
               Calm motion
+            </label>
+            {/* Not the same as keeping them stocked: that one refills at the end
+                of every round, this one holds the levels exactly where they
+                stand — a half-empty pond stays half-empty for good. */}
+            <label title="Animals drink and graze as usual; the levels stop moving">
+              <input
+                type="checkbox"
+                checked={held}
+                onChange={(e) => {
+                  setHeldLevels(e.target.checked);
+                  setHeld(e.target.checked);
+                }}
+              />
+              Hold water and grass levels
             </label>
           </div>
 

@@ -18,6 +18,22 @@ let floor = 0;
 export const stockFloor = () => floor;
 
 export const setStockFloor = (share) => { floor = Math.min(1, Math.max(0, share)); };
+
+/**
+ * Whether the levels are held exactly where they stand. Animals still drink
+ * and still graze — a held pond gives a full mouthful — and nothing raises a
+ * held source either: rain runs off it and topping it up does nothing. The
+ * reading simply stops moving in both directions, because a level that creeps
+ * up while it is meant to be frozen is no more frozen than one that drains.
+ *
+ * Not the same as a floor of 100%, which lets a source drain through the round
+ * and tops it back up at the end: this holds a half-empty pond half-empty.
+ */
+let held = false;
+
+export const heldLevels = () => held;
+
+export const setHeldLevels = (on) => { held = Boolean(on); };
 export const RESOURCE_KINDS = {
   water: {
     kind: "water",
@@ -88,16 +104,21 @@ export default class Resource {
 
   /**
    * Take up to `amount`. A resource can only give what it has.
+   *
+   * Held sources are the exception: the animal gets its whole mouthful and the
+   * level does not move. Every drink and every mouthful in the model comes
+   * through here, so this one line is the whole of it.
    * @returns {number} how much was actually drawn — 0 when it's dry
    */
   draw(amount) {
     const taken = Math.min(amount, this.volume);
-    this.volume -= taken;
+    if (!held) this.volume -= taken;
     return taken;
   }
 
-  /** Put more in, up to capacity. @returns {number} how much fit */
+  /** Put more in, up to capacity — nothing at all while held. @returns {number} how much fit */
   refill(amount) {
+    if (held) return 0;
     const added = Math.min(amount, this.capacity - this.volume);
     this.volume += added;
     return added;
