@@ -2,8 +2,9 @@
 
 `npm run check` proves the model's rules — overlaps, the fence, stride length.
 None of that says the page draws what the model holds, so this walks the UI:
-boots it, selects an animal, adds one, puts down water by mouse and grass by
-keyboard, and lets them roam.
+boots it, checks the field is what the page leads with, selects an animal, adds
+one from its pen's +, opens the chores drawer to put down water by mouse and
+grass by keyboard, and lets them roam.
 
 Expects the dev server already running; `npm run ui-check` starts one first.
 """
@@ -56,6 +57,23 @@ def census(page):
     return counts
 
 
+def show_tab(page, name):
+    """Bring a tab to the front. The two views share no DOM, so anything on the
+    other one is not merely hidden — it does not exist until this is called."""
+    page.get_by_role("tab", name=name).click()
+
+
+def open_drawer(page):
+    """Open Farm controls, which is shut on load and holds the troughs.
+
+    The bucket buttons, the top-ups and the stock line all live in there now, so
+    every check that touches a resource has to knock first. Idempotent: asks the
+    toggle what it already is rather than blindly clicking it shut again."""
+    toggle = page.get_by_role("button", name="Farm controls")
+    if toggle.get_attribute("aria-expanded") != "true":
+        toggle.click()
+
+
 def check_boot(page, errors):
     """The page comes up with every pen represented and nothing thrown."""
     pens = census(page)
@@ -71,6 +89,41 @@ def check_boot(page, errors):
         fail(f"{len(errors)} console error(s) on load: {errors[0]}")
 
     note(f"Booted with {len(on_field)} animals across {len(pens)} pens.")
+
+
+def check_layout(page):
+    """The farm opens on the farm: field first, chores shut, desk out of the way.
+
+    All three of these are what the farmer asked the layout for, and all three
+    fail silently — a drawer that defaults open or a card that drifts above the
+    field still renders every number correctly, and nothing else here would
+    notice. Leaves the page as it found it, because the checks after this one
+    expect the pasture tab.
+    """
+    if page.get_by_role("button", name="Farm controls").get_attribute("aria-expanded") != "false":
+        fail("Farm controls is open on load; it is meant to start collapsed")
+
+    # Shut, but not at the cost of the one control that starts the simulation.
+    roam = page.get_by_role("button", name="Let them roam")
+    if not roam.is_visible():
+        fail("with the drawer shut there is no visible way to let them roam")
+
+    field = page.locator(".fa-pasture").bounding_box()
+    card = page.locator(".fa-card").bounding_box()
+    if card["y"] < field["y"] + field["height"]:
+        fail(f"the animal card starts at y={card['y']:.0f}, above the bottom of "
+             f"the field at y={field['y'] + field['height']:.0f}")
+
+    for stray in (".fa-log", ".fa-settings"):
+        if page.locator(stray).count():
+            fail(f"{stray} is on the pasture tab; it belongs on the desk")
+
+    show_tab(page, "Settings & log")
+    if page.locator(".fa-log").count() == 0 or page.locator(".fa-settings").count() == 0:
+        fail("the settings and the log are not on the second tab either")
+    show_tab(page, "Pasture")
+
+    note("Opens on the field: chores collapsed, roam to hand, card below, desk on its own tab.")
 
 
 def check_selection(page):
@@ -95,26 +148,66 @@ def check_selection(page):
 
 
 def check_add(page):
-    """Adding a duck adds exactly one duck, and says so."""
-    before = census(page).get("Duck", 0)
-    page.locator(".fa-add select").select_option("Duck")
-    page.get_by_role("button", name="+ Add to pasture").click()
+    """The + on a pen adds exactly one of that species, and says so.
 
-    after = census(page).get("Duck", 0)
-    if after != before + 1:
-        fail(f"added a duck but the pen went {before} → {after}")
+    There is no species dropdown any more — which pen's + you press is how the
+    species is chosen. All six + buttons read "+", so their accessible names are
+    the only thing telling them apart; ask for one by name, exactly, or this
+    would happily add a cow and call it a duck.
+    """
+    pens = census(page)
+    before = pens.get("Duck", 0)
+    page.get_by_role("button", name="Add a duck", exact=True).click()
 
+    after = census(page)
+    if after.get("Duck", 0) != before + 1:
+        fail(f"pressed + on the duck pen but it went {before} → {after.get('Duck', 0)}")
+
+    strays = {s: (pens[s], after.get(s)) for s in pens
+              if s != "Duck" and after.get(s) != pens[s]}
+    if strays:
+        fail(f"the duck's + also moved other pens: {strays}")
+
+    # The log is on the other tab now, so this is the one assertion here that
+    # has to leave the field to make itself.
+    show_tab(page, "Settings & log")
     log = page.locator(".fa-log-row").first.inner_text()
+    show_tab(page, "Pasture")
     if "duck" not in log.lower():
         fail(f"nothing in the log about the new duck; top entry was {log.strip()!r}")
 
-    note(f"Added a duck: pen {before} → {after}, logged.")
+    note(f"+ on the duck pen: {before} → {after.get('Duck', 0)}, no other pen moved, logged.")
+
+
+def check_every_pen(page):
+    """Each pen's + adds its own species, not the first one on the row.
+
+    check_add proves the duck's + in detail; this proves the other five are not
+    all wired to the same species. Six buttons that read "+" and differ only in
+    an aria-label are exactly the shape of thing that goes wrong silently — the
+    pasture would still fill up, the log would still scroll, and only the head
+    counts would quietly disagree with what was pressed.
+    """
+    before = census(page)
+    for species in SPECIES:
+        page.get_by_role("button", name=f"Add a {species.lower()}", exact=True).click()
+
+    after = census(page)
+    wrong = {s: (before.get(s, 0), after.get(s, 0)) for s in SPECIES
+             if after.get(s, 0) != before.get(s, 0) + 1}
+    if wrong:
+        fail(f"one + per pen should have added one of each; these went {wrong} "
+             "(before → after)")
+        return
+
+    note(f"All {len(SPECIES)} pens' + buttons added their own species.")
 
 
 def check_place_water(page):
     """Water lands where the farmer clicked, and the field shows more of it."""
+    open_drawer(page)
     before = len(page.locator(".fa-water").all())
-    stock_before = page.locator(".fa-yield").first.inner_text()
+    stock_before = page.locator(".fa-stock").inner_text()
 
     page.get_by_role("button", name="💧 water").click()
     box = page.locator(".fa-pasture").bounding_box()
@@ -156,7 +249,7 @@ def check_place_water(page):
         else:
             note(f"Water landed at {placed['x']:.0f},{placed['y']:.0f}% for a click at 25,40%.")
 
-    if page.locator(".fa-yield").first.inner_text() == stock_before:
+    if page.locator(".fa-stock").inner_text() == stock_before:
         fail("stock line did not change after putting water down")
 
     # The keyboard's aim marker is furniture the mouse never asked for: armed by
@@ -175,6 +268,7 @@ def check_place_by_keyboard(page):
     capability real: the field takes focus, something visible says where the
     drop point is, and the arrows move it there before Enter lands it.
     """
+    open_drawer(page)
     before = len(page.locator(".fa-grass").all())
     page.get_by_role("button", name="🌿 grass").focus()
     page.keyboard.press("Enter")
@@ -299,8 +393,10 @@ def main():
         page.wait_for_selector(".fa-sprite")
 
         check_boot(page, errors)
+        check_layout(page)
         check_selection(page)
         check_add(page)
+        check_every_pen(page)
         check_place_water(page)
         check_place_by_keyboard(page)
         check_resource_colour(page)

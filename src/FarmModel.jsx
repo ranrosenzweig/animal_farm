@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
-import { SPECIES, speciesNamed } from "./model/species.js";
+import { speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
@@ -156,6 +156,16 @@ const MINDS = {
   claude: { label: "Claude", Mind: ClaudeMind },
 };
 
+/**
+ * The two views of the farm. The field is the point of the page, so it opens
+ * on that; the dials and the day's record are a step away rather than a column
+ * stealing half the width from the pasture.
+ */
+const TABS = [
+  { id: "pasture", label: "Pasture" },
+  { id: "desk", label: "Settings & log" },
+];
+
 /** How many log lines are kept, whatever the settings choose to show. */
 const LOG_KEPT = 50;
 const LOG_SHOWN = [8, 20, 50];
@@ -208,9 +218,11 @@ export default function FarmModel() {
   const [selectedId, setSelectedId] = useState(() => null);
   const [log, setLog] = useState([{ id: "start", text: "The farm registry opens for the day.", kind: "info" }]);
   const [speakingId, setSpeakingId] = useState(null);
-  const [addSpecies, setAddSpecies] = useState(SPECIES[0].species);
   const [showSource, setShowSource] = useState(false);
   const [roaming, setRoaming] = useState(false);
+  const [tab, setTab] = useState(TABS[0].id);
+  /** Whether the drawer of chores above the field is open. Shut on arrival. */
+  const [chores, setChores] = useState(false);
   /** Which kind of resource the next pasture click puts down, if any. */
   const [placing, setPlacing] = useState(null);
   /** Where the keys would drop it, in pasture percent. Null when nothing is armed. */
@@ -247,6 +259,10 @@ export default function FarmModel() {
   // farmer picks up a bucket, and handed back when they put it down.
   const pastureRef = useRef(null);
   const armedFrom = useRef(null);
+
+  // Arrow keys move between tabs, which means the tab that is not selected must
+  // not be a tab stop of its own — so the row needs to hand focus over itself.
+  const tabRefs = useRef({});
 
   useEffect(() => {
     if (placing) pastureRef.current?.focus();
@@ -403,8 +419,30 @@ export default function FarmModel() {
     }
   }
 
-  function addAnimal() {
-    const fresh = speciesNamed(addSpecies).random();
+  /**
+   * Show one of the two views. A bucket in hand is aimed at a field that is
+   * about to leave the screen, so it goes back on the shelf — quietly, since
+   * the button that armed it is going with it.
+   */
+  function showTab(id) {
+    if (id !== "pasture") setPlacing(null);
+    setTab(id);
+  }
+
+  /** Left and right along the tab row, as a tablist is expected to behave. */
+  function steerTabs(event) {
+    const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const at = TABS.findIndex((t) => t.id === tab);
+    const next = TABS[(at + step + TABS.length) % TABS.length];
+    showTab(next.id);
+    tabRefs.current[next.id]?.focus();
+  }
+
+  /** One more of a species, from the + on that species' pen chip. */
+  function addAnimal(species) {
+    const fresh = speciesNamed(species).random();
     const { farm: next, added } = farm.add(fresh);
     if (!added) {
       pushLog(`No room in the pasture for another ${fresh.species.toLowerCase()}.`, "info");
@@ -413,6 +451,8 @@ export default function FarmModel() {
     setFarm(next);
     setSelectedId(fresh.id);
     setShowSource(false);
+    // The newcomer's card is under the field, so go and look at it.
+    showTab("pasture");
     pushLog(`${fresh.name} the ${fresh.species.toLowerCase()} joins the farm.`, "info");
   }
 
@@ -477,40 +517,136 @@ export default function FarmModel() {
           gap: 8px;
           margin-top: 12px;
         }
+        /* The pill is no longer the button: a pen holds two controls now, and
+           one button cannot sit inside another. The chip is the frame, and the
+           two halves of it fill it edge to edge. */
         .fa-chip {
           display: flex;
           align-items: center;
-          gap: 6px;
           background: rgba(246,239,221,0.12);
           border: 1px solid rgba(246,239,221,0.35);
           color: var(--cream);
           padding: 4px 10px 4px 6px;
           border-radius: 999px;
           font-size: 12px;
-          cursor: pointer;
         }
-        .fa-chip:hover { background: rgba(246,239,221,0.22); }
-        .fa-chip:disabled { opacity: 0.4; cursor: default; }
+        /* The legend chip is a label, not a pen: nothing in it to press. */
+        .fa-chip.base { gap: 6px; }
+        .fa-chip .pen,
+        .fa-chip .add {
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          color: var(--cream);
+          background: none;
+          border: none;
+          cursor: pointer;
+          /* Both reach out into the pill's own padding, so the target is the
+             whole end of the chip rather than the glyph in the middle of it. */
+          margin-top: -4px;
+          margin-bottom: -4px;
+          padding-top: 4px;
+          padding-bottom: 4px;
+        }
+        .fa-chip .pen {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          margin-left: -6px;
+          padding-left: 6px;
+          padding-right: 7px;
+          border-radius: 999px 0 0 999px;
+        }
+        .fa-chip .add {
+          margin-right: -10px;
+          padding-left: 10px;
+          padding-right: 10px;
+          /* The seam between the two, in the chip's own border colour. */
+          border-left: 1px solid rgba(246,239,221,0.35);
+          border-radius: 0 999px 999px 0;
+          font-size: 15px;
+          line-height: 12px;
+        }
+        /* Darkens under the pointer rather than lightening, the way .fa-btn
+           does. The old chip lit up instead, which put cream text on a paler
+           chip: measured on the rendered header that was 3.8:1, and the + is
+           small enough that it needed the room. Pressed into the wood, it is
+           8.6:1 and the hover still reads. */
+        .fa-chip .pen:hover,
+        .fa-chip .add:hover { background: rgba(46,42,31,0.45); }
+        /* An empty pen has nobody to select, but it is exactly where a farmer
+           wants to add one — so the body dims and the + stays lit. */
+        .fa-chip .pen:disabled { opacity: 0.4; cursor: default; }
+        .fa-chip .pen:disabled:hover { background: none; }
+        .fa-chip .pen:focus-visible,
+        .fa-chip .add:focus-visible {
+          outline: 2px solid var(--cream);
+          /* Inside its own edge: an outline outside it would be cropped by the
+             pill, and the two halves would both look like the same control. */
+          outline-offset: -2px;
+        }
         .fa-chip .dot {
           width: 9px; height: 9px; border-radius: 50%;
         }
         .fa-chip .n { font-family: 'JetBrains Mono', monospace; opacity: 0.85; }
 
+        /* Two views of one farm: the field, and the desk where the dials and
+           the day's record are kept. Underlined rather than boxed, so the row
+           reads as a divider on the sky and not as another panel. */
+        .fa-tabs {
+          display: flex;
+          gap: 6px;
+          padding: 10px 16px 0;
+          border-bottom: 1px solid rgba(87,58,32,0.22);
+        }
+        .fa-tab {
+          font-family: 'Inter', sans-serif;
+          font-size: 12.5px;
+          font-weight: 600;
+          color: #6b5f42;
+          background: transparent;
+          border: none;
+          border-bottom: 3px solid transparent;
+          border-radius: 6px 6px 0 0;
+          /* Sits on the row's own rule, so the selected tab's underline
+             replaces it rather than doubling it. */
+          margin-bottom: -1px;
+          padding: 8px 14px;
+          cursor: pointer;
+        }
+        .fa-tab:hover { color: var(--ink); }
+        .fa-tab[aria-selected="true"] {
+          color: var(--ink);
+          background: rgba(255,255,255,0.55);
+          border-bottom-color: var(--barn-red);
+        }
+        .fa-tab:focus-visible { outline: 2px solid var(--wood); outline-offset: 2px; }
+
+        /* One column now: the field is the page, and everything else is above
+           or below it rather than beside it. */
         .fa-body {
           display: flex;
+          flex-direction: column;
           gap: 16px;
           padding: 16px;
         }
-        @media (max-width: 820px) {
-          .fa-body { flex-direction: column; }
-        }
+        /* The desk is read, not watched. Left the full width of the page its
+           sliders would be a metre long and its log lines too wide to track
+           back to the left margin. */
+        .fa-desk { max-width: 760px; }
 
         .fa-pasture {
           position: relative;
-          /* Wider than it used to be: a field that recedes needs room across
-             the near edge, or the taper reads as a runway. */
-          flex: 1.6;
-          min-height: 360px;
+          /* The field has the whole width now that no panel shares its row, so
+             its height is stated rather than inherited from a neighbour: a
+             share of the window, capped so a tall one cannot stretch the
+             ground into a corridor.
+
+             The 82vw is what keeps it a field. Below 620px of window the old
+             floor made the pasture taller than it was wide — 316×558 on a
+             380px screen — and a receding plane drawn portrait reads as a
+             hallway, not a pasture. The floor is low for the same reason: at
+             700×500 a 460px minimum ate 92% of the window. */
+          height: clamp(300px, min(62vh, 82vw), 680px);
           border-radius: 10px;
           overflow: hidden;
           /* Sky only. The field is a separate, tapered plane laid over it. */
@@ -780,7 +916,65 @@ export default function FarmModel() {
           text-shadow: 0 1px 2px rgba(0,0,0,0.35);
         }
 
-        .fa-panel { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
+        /* The day's chores, folded away above the field. What stays out is
+           what the farmer needs without opening anything: how many head, what
+           is left in the troughs, and the one switch that starts the day. */
+        .fa-chores {
+          background: var(--cream);
+          border: 1px solid #e3d6b3;
+          border-radius: 8px;
+          padding: 8px 12px;
+        }
+        .fa-drawer-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px 14px;
+          flex-wrap: wrap;
+        }
+        .fa-drawer-toggle {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-family: 'Inter', sans-serif;
+          font-size: 12.5px;
+          font-weight: 600;
+          color: var(--ink);
+          background: none;
+          border: none;
+          padding: 4px 2px;
+          cursor: pointer;
+        }
+        /* Sized to the label beside it, not to the 10px caps it used to sit
+           against on the old summary: at 9px against 12.5px text the arrow
+           lost its point and read as a bullet. */
+        .fa-drawer-toggle .caret { font-size: 12.5px; color: var(--wood); }
+        .fa-drawer-toggle:focus-visible {
+          outline: 2px solid var(--wood);
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+        .fa-glance {
+          display: flex;
+          align-items: baseline;
+          gap: 10px;
+          flex-wrap: wrap;
+          font-size: 12.5px;
+        }
+        .fa-glance .item { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+        /* Roaming is the whole simulation, so it never goes in the drawer. */
+        .fa-drawer-bar .fa-btn { margin-left: auto; }
+        .fa-drawer {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px dashed #d9caa0;
+        }
+        /* The hidden attribute alone would lose to the display above. The rows
+           are left in the page rather than unmounted, so shutting the drawer
+           never costs a select its value. */
+        .fa-drawer[hidden] { display: none; }
 
         .fa-card {
           position: relative;
@@ -788,8 +982,26 @@ export default function FarmModel() {
           border: 1px solid #e3d6b3;
           border-radius: 6px;
           padding: 16px 16px 14px;
-          transform: rotate(-1.2deg);
+          /* Still pinned askew, but barely: the card is as wide as the field
+             now, and a degree of tilt across that span lifts one corner far
+             enough to collide with the fence above it. */
+          transform: rotate(-0.35deg);
           box-shadow: 2px 3px 0 rgba(0,0,0,0.08);
+        }
+        .fa-card-head {
+          display: flex;
+          align-items: flex-end;
+          flex-wrap: wrap;
+          gap: 2px 20px;
+        }
+        /* Under the field the card has width instead of depth, so what used to
+           be one long strip is read side by side. auto-fit rather than three
+           fixed columns: on a narrow window they fall back into one. */
+        .fa-card-cols {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+          gap: 2px 26px;
+          align-items: start;
         }
         .fa-card::before {
           content: "";
@@ -990,53 +1202,21 @@ export default function FarmModel() {
           .fa-source.low { animation: none; }
         }
 
-        .fa-add {
-          background: white;
-          border: 1px solid #ddd;
-          border-radius: 8px;
-          padding: 10px 12px;
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-        .fa-add select {
-          flex: 1;
-          font-family: 'Inter', sans-serif;
-          font-size: 12.5px;
-          padding: 6px 8px;
-          border-radius: 5px;
-          border: 1px solid #ccc;
-        }
-
-        /* Shut by default: these are the farm's dials, not its controls, and
-           an open panel of them would crowd out the log. */
+        /* No longer a disclosure: the tab it sits behind is the disclosure, and
+           a shut panel inside a tab the farmer chose is a second door for
+           nothing. */
         .fa-settings {
           background: white;
           border: 1px solid #ddd;
           border-radius: 8px;
           padding: 10px 12px;
         }
-        .fa-settings > summary {
-          display: flex;
-          align-items: center;
-          gap: 6px;
+        .fa-settings-title {
           font-size: 10.5px;
           text-transform: uppercase;
           letter-spacing: 0.6px;
           color: #6b5f42;
-          cursor: pointer;
-          /* The stock triangle sits on its own baseline and can't be coloured;
-             a ::before is a caret that lines up with 10px caps. */
-          list-style: none;
-        }
-        .fa-settings > summary::-webkit-details-marker { display: none; }
-        .fa-settings > summary::before { content: "▸"; font-size: 9px; }
-        .fa-settings[open] > summary::before { content: "▾"; }
-        .fa-settings[open] > summary { margin-bottom: 4px; }
-        .fa-settings > summary:focus-visible {
-          outline: 2px solid var(--wood);
-          outline-offset: 2px;
-          border-radius: 3px;
+          margin-bottom: 4px;
         }
         .fa-set-row {
           display: flex;
@@ -1095,9 +1275,10 @@ export default function FarmModel() {
           border: 1px solid #e6ddc4;
           border-radius: 8px;
           padding: 10px 12px;
-          flex: 1;
           min-height: 90px;
-          max-height: 170px;
+          /* Room to actually read the day back, now that it is not competing
+             with the field for the same column. */
+          max-height: 420px;
           overflow-y: auto;
         }
         .fa-log-title {
@@ -1130,29 +1311,224 @@ export default function FarmModel() {
           an object model, out to pasture — {farm.size} {farm.size === 1 ? "animal" : "animals"} on the books
         </div>
         <div className="fa-chips">
-          <div className="fa-chip" style={{ opacity: 0.75, cursor: "default" }}>
+          <div className="fa-chip base" style={{ opacity: 0.75 }}>
             <span className="dot" style={{ background: "#cfe8d8" }} />
             Animal (base class)
           </div>
           {census.map((pen) => (
-            <button
-              key={pen.species}
-              className="fa-chip"
-              disabled={pen.count === 0}
-              onClick={() => {
-                const first = farm.bySpecies(pen.species)[0];
-                if (first) { setSelectedId(first.id); setShowSource(false); }
-              }}
-            >
-              <span className="dot" style={{ background: pen.color }} />
-              {pen.emoji} {pen.species}
-              <span className="n">×{pen.count}</span>
-            </button>
+            <div className="fa-chip" key={pen.species}>
+              <button
+                className="pen"
+                disabled={pen.count === 0}
+                // The count is in the name as words, not as "×1": the chip is
+                // read aloud as a pen with animals in it, not as a sum.
+                aria-label={`${pen.species} pen, ${pen.count} ${pen.count === 1 ? "animal" : "animals"}`}
+                onClick={() => {
+                  const first = farm.bySpecies(pen.species)[0];
+                  // The chips stay above both views, but the card they open is
+                  // under the field — so picking a pen goes back to the field.
+                  if (first) { setSelectedId(first.id); setShowSource(false); showTab("pasture"); }
+                }}
+              >
+                <span className="dot" style={{ background: pen.color }} />
+                {pen.emoji} {pen.species}
+                <span className="n">×{pen.count}</span>
+              </button>
+              <button
+                className="add"
+                aria-label={`Add a ${pen.species.toLowerCase()}`}
+                onClick={() => addAnimal(pen.species)}
+              >
+                +
+              </button>
+            </div>
           ))}
         </div>
       </div>
 
-      <div className="fa-body">
+      <div className="fa-tabs" role="tablist" aria-label="Farm views">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            id={`fa-tab-${t.id}`}
+            className="fa-tab"
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`fa-view-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            ref={(el) => { tabRefs.current[t.id] = el; }}
+            onClick={() => showTab(t.id)}
+            onKeyDown={steerTabs}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "pasture" && (
+      <div
+        className="fa-body"
+        id="fa-view-pasture"
+        role="tabpanel"
+        aria-labelledby="fa-tab-pasture"
+      >
+        <div className="fa-chores">
+          <div className="fa-drawer-bar">
+            <button
+              className="fa-drawer-toggle"
+              aria-expanded={chores}
+              aria-controls="fa-chores-drawer"
+              onClick={() => setChores((v) => !v)}
+            >
+              <span className="caret" aria-hidden="true">{chores ? "▾" : "▸"}</span>
+              Farm controls
+            </button>
+            {/* What the drawer hides is detail, not the state of the farm: the
+                head count and what is left in the troughs stay out here, and
+                the numbers go straw then barn red as the troughs run down.
+                The stock stands down once the drawer is open, rather than say
+                the same thing twice a line apart. */}
+            <span className="fa-glance">
+              <span className="item">{farm.size} head</span>
+              {!chores && stock.map((s) => (
+                <span
+                  className="item"
+                  key={s.kind}
+                  style={{
+                    color: s.volume === 0
+                      ? "#a13c2c"
+                      : lowKinds.has(s.kind) ? "#8a5a12" : undefined,
+                  }}
+                >
+                  {RESOURCE_ICONS[s.kind]} {s.volume} {s.unit}
+                </span>
+              ))}
+            </span>
+            {/* Solid, where it used to be an outline among five others: with
+                the drawer shut this is the only thing on the bar to press. */}
+            <button
+              className="fa-btn"
+              onClick={() => setRoaming((v) => !v)}
+              disabled={farm.size === 0}
+            >
+              {roaming ? "⏸ Stop roaming" : "▶ Let them roam"}
+            </button>
+          </div>
+
+          <div className="fa-drawer" id="fa-chores-drawer" hidden={!chores}>
+            <div className="fa-yield fa-stock">
+              <span className="lbl">In the field</span>
+              {stock.map((s) => (
+                <span
+                  className="item"
+                  key={s.kind}
+                  style={{
+                    color: s.volume === 0
+                      ? "#a13c2c"
+                      : lowKinds.has(s.kind) ? "#8a5a12" : undefined,
+                  }}
+                >
+                  {RESOURCE_ICONS[s.kind]} {s.volume} {s.unit}
+                  {s.sources > 1 && <span className="none"> ×{s.sources}</span>}
+                </span>
+              ))}
+              <span className="lbl" style={{ marginLeft: "auto" }}>Put down</span>
+              {["water", "grass"].map((kind) => (
+                <button
+                  key={kind}
+                  className="fa-btn alt"
+                  style={placing === kind
+                    ? { background: "var(--wood)", color: "var(--cream)" }
+                    : undefined}
+                  onClick={(event) => arm(kind, event.currentTarget)}
+                >
+                  {RESOURCE_ICONS[kind]} {kind}
+                </button>
+              ))}
+              <span className="lbl">Top up</span>
+              {["water", "grass"].map((kind) => {
+                // Nothing of that kind in the field, or all of it already full.
+                const spare = farm.resources.some(
+                  (r) => r.kind === kind && r.volume < r.capacity,
+                );
+                return (
+                  <button
+                    key={kind}
+                    className="fa-btn alt"
+                    // Its own name, sharing none of "💧 water" above: the two
+                    // buttons per kind have to stay tellable apart by anything
+                    // that finds them by their accessible name.
+                    aria-label={`Top up ${kind}`}
+                    disabled={!spare}
+                    onClick={() => topUp(kind)}
+                  >
+                    {RESOURCE_ICONS[kind]} +
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="fa-yield">
+              <span className="lbl">Doing now</span>
+              {activity.length === 0
+                ? <span className="none">nobody about</span>
+                : activity.map((a) => (
+                    <span className="item" key={a.goal}>
+                      {GOAL_ICONS[a.goal] ?? "•"} {a.count} {a.goal}
+                    </span>
+                  ))}
+              {expecting > 0 && (
+                <span className="item" style={{ color: "#7d2a1e" }}>
+                  🤰 {expecting} expecting
+                </span>
+              )}
+            </div>
+
+            <div className="fa-yield">
+              <span className="lbl">Daily yield</span>
+              {produce.length === 0
+                ? <span className="none">nothing to collect today</span>
+                : produce.map((p) => (
+                    <span className="item" key={p.label}>
+                      {p.label} {p.amount}{p.unit && ` ${p.unit}`}
+                    </span>
+                  ))}
+            </div>
+
+          </div>
+        </div>
+
+        {/* Outside the drawer on purpose. A trough running down is the one
+            thing the farm says without being asked, and a warning nobody can
+            hear until they open a panel is not a warning. */}
+        {lowSources.length > 0 && (
+          <div className="fa-yield fa-low" role="status" aria-live="polite">
+            <span className="lbl">Running low</span>
+            {lowSources.map((s) => (
+              <span className="item" key={s.id}>
+                {RESOURCE_ICONS[s.kind]} {s.name} — {Math.round(s.volume)} {s.unit}
+                <span className="none"> ({Math.round(s.fullness * 100)}%)</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Likewise: while a bucket is in hand this is the only instruction for
+            it, and it sits against the field it is talking about. */}
+        {placing && dropAt && (
+          <div className="fa-yield">
+            <span className="none">
+              Click anywhere in the pasture to put down {placing} — or arrow keys
+              to aim, Enter to drop, Esc to cancel.
+            </span>
+            {/* The only account of where the drop point is for anyone who
+                cannot see the marker on the field. */}
+            <span className="item" style={{ marginLeft: "auto" }} aria-live="polite">
+              {RESOURCE_ICONS[placing]} {Math.round(dropAt.x)}%, {Math.round(dropAt.y)}%
+            </span>
+          </div>
+        )}
+
         <div
           ref={pastureRef}
           className={"fa-pasture" + (placing ? " placing" : "")}
@@ -1230,16 +1606,20 @@ export default function FarmModel() {
               {RESOURCE_ICONS[placing]}
             </div>
           )}
-          {farm.size === 0 && <div className="fa-empty">The pasture is empty. Add an animal below.</div>}
+          {farm.size === 0 && (
+            <div className="fa-empty">The pasture is empty. Press + on a pen at the top to add one.</div>
+          )}
           <div className="fa-fence" />
         </div>
 
-        <div className="fa-panel">
-          {selected && (
-            <div className="fa-card">
-              <div className="fa-card-species">class {selected.species} extends Animal</div>
-              <div className="fa-card-name">
-                {selected.emoji} {selected.name} <span className="sex">{SEX_MARKS[selected.sex]}</span>
+        {selected && (
+          <div className="fa-card">
+            <div className="fa-card-head">
+              <div>
+                <div className="fa-card-species">class {selected.species} extends Animal</div>
+                <div className="fa-card-name">
+                  {selected.emoji} {selected.name} <span className="sex">{SEX_MARKS[selected.sex]}</span>
+                </div>
               </div>
               <div className="fa-intent">
                 <span>{GOAL_ICONS[selected.goal] ?? "•"} {selected.goal}</span>
@@ -1261,6 +1641,8 @@ export default function FarmModel() {
                   </span>
                 </div>
               )}
+            </div>
+            <div className="fa-card-cols">
               <div className="fa-drives">
                 <div className="fa-drive">
                   <span className="n">Condition</span>
@@ -1319,241 +1701,127 @@ export default function FarmModel() {
                   ))
                 )}
               </div>
-              <div className="fa-actions">
-                <button className="fa-btn" onClick={() => runAction("makeSound")}>🔊 Make sound</button>
-                <button className="fa-btn" onClick={() => runAction("move")}>🚶 Move</button>
-                <button className="fa-btn" onClick={() => runAction("eat")}>🌾 Feed</button>
-                <button className="fa-btn alt" onClick={() => setShowSource((v) => !v)}>
-                  {showSource ? "Hide source" : "View source"}
-                </button>
-                <button className="fa-btn alt" onClick={removeSelected}>Remove</button>
-              </div>
-              {showSource && <div className="fa-code">{sourceOf(selected.species)}</div>}
             </div>
-          )}
-
-          <div className="fa-yield">
-            <span className="lbl">In the field</span>
-            {stock.map((s) => (
-              <span
-                className="item"
-                key={s.kind}
-                style={{
-                  color: s.volume === 0
-                    ? "#a13c2c"
-                    : lowKinds.has(s.kind) ? "#8a5a12" : undefined,
-                }}
-              >
-                {RESOURCE_ICONS[s.kind]} {s.volume} {s.unit}
-                {s.sources > 1 && <span className="none"> ×{s.sources}</span>}
-              </span>
-            ))}
-            <span className="lbl" style={{ marginLeft: "auto" }}>Put down</span>
-            {["water", "grass"].map((kind) => (
-              <button
-                key={kind}
-                className="fa-btn alt"
-                style={placing === kind
-                  ? { background: "var(--wood)", color: "var(--cream)" }
-                  : undefined}
-                onClick={(event) => arm(kind, event.currentTarget)}
-              >
-                {RESOURCE_ICONS[kind]} {kind}
+            <div className="fa-actions">
+              <button className="fa-btn" onClick={() => runAction("makeSound")}>🔊 Make sound</button>
+              <button className="fa-btn" onClick={() => runAction("move")}>🚶 Move</button>
+              <button className="fa-btn" onClick={() => runAction("eat")}>🌾 Feed</button>
+              <button className="fa-btn alt" onClick={() => setShowSource((v) => !v)}>
+                {showSource ? "Hide source" : "View source"}
               </button>
-            ))}
-            <span className="lbl">Top up</span>
-            {["water", "grass"].map((kind) => {
-              // Nothing of that kind in the field, or all of it already full.
-              const spare = farm.resources.some(
-                (r) => r.kind === kind && r.volume < r.capacity,
-              );
-              return (
-                <button
-                  key={kind}
-                  className="fa-btn alt"
-                  // Its own name, sharing none of "💧 water" above: the two
-                  // buttons per kind have to stay tellable apart by anything
-                  // that finds them by their accessible name.
-                  aria-label={`Top up ${kind}`}
-                  disabled={!spare}
-                  onClick={() => topUp(kind)}
-                >
-                  {RESOURCE_ICONS[kind]} +
-                </button>
-              );
-            })}
+              <button className="fa-btn alt" onClick={removeSelected}>Remove</button>
+            </div>
+            {showSource && <div className="fa-code">{sourceOf(selected.species)}</div>}
+          </div>
+        )}
+      </div>
+      )}
+
+      {tab === "desk" && (
+      <div
+        className="fa-body fa-desk"
+        id="fa-view-desk"
+        role="tabpanel"
+        aria-labelledby="fa-tab-desk"
+      >
+        <div className="fa-settings">
+          <div className="fa-settings-title">Settings</div>
+
+          <div className="fa-set-row">
+            <span className="l" id="set-step">Step length</span>
+            <input
+              type="range"
+              min={STEP_MIN}
+              max={STEP_MAX}
+              step={50}
+              value={stepMs}
+              aria-labelledby="set-step"
+              onChange={(e) => setStepMs(Number(e.target.value))}
+            />
+            <span className="v">{stepMs} ms</span>
           </div>
 
-          {lowSources.length > 0 && (
-            <div className="fa-yield fa-low" role="status" aria-live="polite">
-              <span className="lbl">Running low</span>
-              {lowSources.map((s) => (
-                <span className="item" key={s.id}>
-                  {RESOURCE_ICONS[s.kind]} {s.name} — {Math.round(s.volume)} {s.unit}
-                  <span className="none"> ({Math.round(s.fullness * 100)}%)</span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {placing && dropAt && (
-            <div className="fa-yield">
-              <span className="none">
-                Click anywhere in the pasture to put down {placing} — or arrow keys
-                to aim, Enter to drop, Esc to cancel.
-              </span>
-              {/* The only account of where the drop point is for anyone who
-                  cannot see the marker on the field. */}
-              <span className="item" style={{ marginLeft: "auto" }} aria-live="polite">
-                {RESOURCE_ICONS[placing]} {Math.round(dropAt.x)}%, {Math.round(dropAt.y)}%
-              </span>
-            </div>
-          )}
-
-          <div className="fa-yield">
-            <span className="lbl">Doing now</span>
-            {activity.length === 0
-              ? <span className="none">nobody about</span>
-              : activity.map((a) => (
-                  <span className="item" key={a.goal}>
-                    {GOAL_ICONS[a.goal] ?? "•"} {a.count} {a.goal}
-                  </span>
-                ))}
-            {expecting > 0 && (
-              <span className="item" style={{ color: "#7d2a1e" }}>
-                🤰 {expecting} expecting
-              </span>
-            )}
-          </div>
-
-          <div className="fa-yield">
-            <span className="lbl">Daily yield</span>
-            {produce.length === 0
-              ? <span className="none">nothing to collect today</span>
-              : produce.map((p) => (
-                  <span className="item" key={p.label}>
-                    {p.label} {p.amount}{p.unit && ` ${p.unit}`}
-                  </span>
-                ))}
-            <button
-              className="fa-btn alt"
-              style={{ marginLeft: "auto" }}
-              onClick={() => setRoaming((v) => !v)}
-              disabled={farm.size === 0}
+          <div className="fa-set-row">
+            <span className="l" id="set-mind">Animal mind</span>
+            <select
+              value={mindKind}
+              aria-labelledby="set-mind"
+              onChange={(e) => setMindKind(e.target.value)}
             >
-              {roaming ? "⏸ Stop roaming" : "▶ Let them roam"}
-            </button>
-          </div>
-
-          <div className="fa-add">
-            <select value={addSpecies} onChange={(e) => setAddSpecies(e.target.value)}>
-              {SPECIES.map((Species) => (
-                <option key={Species.species} value={Species.species}>
-                  {Species.emoji} New {Species.species}
-                </option>
+              {Object.entries(MINDS).map(([key, { label }]) => (
+                <option key={key} value={key}>{label}</option>
               ))}
             </select>
-            <button className="fa-btn" onClick={addAnimal}>+ Add to pasture</button>
           </div>
 
-          <details className="fa-settings">
-            <summary>Settings</summary>
-
-            <div className="fa-set-row">
-              <span className="l" id="set-step">Step length</span>
-              <input
-                type="range"
-                min={STEP_MIN}
-                max={STEP_MAX}
-                step={50}
-                value={stepMs}
-                aria-labelledby="set-step"
-                onChange={(e) => setStepMs(Number(e.target.value))}
-              />
-              <span className="v">{stepMs} ms</span>
-            </div>
-
-            <div className="fa-set-row">
-              <span className="l" id="set-mind">Animal mind</span>
-              <select
-                value={mindKind}
-                aria-labelledby="set-mind"
-                onChange={(e) => setMindKind(e.target.value)}
-              >
-                {Object.entries(MINDS).map(([key, { label }]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="fa-set-row">
-              <span className="l" id="set-cadence">Rethink every</span>
-              <input
-                type="range"
-                min={1}
-                max={30}
-                value={cadence}
-                aria-labelledby="set-cadence"
-                onChange={(e) => setCadence(Number(e.target.value))}
-              />
-              <span className="v">{cadence} {cadence === 1 ? "step" : "steps"}</span>
-            </div>
-
-            <div className="fa-set-row">
-              <span className="l" id="set-low">Warn below</span>
-              <input
-                type="range"
-                min={5}
-                max={75}
-                step={5}
-                value={Math.round(lowAt * 100)}
-                aria-labelledby="set-low"
-                onChange={(e) => setLowAt(Number(e.target.value) / 100)}
-              />
-              <span className="v">{Math.round(lowAt * 100)}%</span>
-            </div>
-
-            <div className="fa-set-row">
-              <span className="l" id="set-log">Log lines</span>
-              <select
-                value={logLines}
-                aria-labelledby="set-log"
-                onChange={(e) => setLogLines(Number(e.target.value))}
-              >
-                {LOG_SHOWN.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-
-            <div className="fa-set-checks">
-              <label>
-                <input type="checkbox" checked={showTags} onChange={(e) => setShowTags(e.target.checked)} />
-                Name tags
-              </label>
-              <label>
-                <input type="checkbox" checked={calm} onChange={(e) => setCalm(e.target.checked)} />
-                Calm motion
-              </label>
-            </div>
-
-            {mindKind === "claude" && (
-              <div className="fa-set-note">
-                Every animal now asks the /decide proxy what to want — run
-                <code> npm run proxy</code>, or they keep the goal they had.
-              </div>
-            )}
-          </details>
-
-          <div className="fa-log">
-            <div className="fa-log-title">Activity log</div>
-            {log.slice(0, logLines).map((entry) => (
-              <div className="fa-log-row" key={entry.id}>
-                <span className="k">{entry.kind === "info" ? "•" : entry.kind}</span>
-                <span>{entry.text}</span>
-              </div>
-            ))}
+          <div className="fa-set-row">
+            <span className="l" id="set-cadence">Rethink every</span>
+            <input
+              type="range"
+              min={1}
+              max={30}
+              value={cadence}
+              aria-labelledby="set-cadence"
+              onChange={(e) => setCadence(Number(e.target.value))}
+            />
+            <span className="v">{cadence} {cadence === 1 ? "step" : "steps"}</span>
           </div>
+
+          <div className="fa-set-row">
+            <span className="l" id="set-low">Warn below</span>
+            <input
+              type="range"
+              min={5}
+              max={75}
+              step={5}
+              value={Math.round(lowAt * 100)}
+              aria-labelledby="set-low"
+              onChange={(e) => setLowAt(Number(e.target.value) / 100)}
+            />
+            <span className="v">{Math.round(lowAt * 100)}%</span>
+          </div>
+
+          <div className="fa-set-row">
+            <span className="l" id="set-log">Log lines</span>
+            <select
+              value={logLines}
+              aria-labelledby="set-log"
+              onChange={(e) => setLogLines(Number(e.target.value))}
+            >
+              {LOG_SHOWN.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="fa-set-checks">
+            <label>
+              <input type="checkbox" checked={showTags} onChange={(e) => setShowTags(e.target.checked)} />
+              Name tags
+            </label>
+            <label>
+              <input type="checkbox" checked={calm} onChange={(e) => setCalm(e.target.checked)} />
+              Calm motion
+            </label>
+          </div>
+
+          {mindKind === "claude" && (
+            <div className="fa-set-note">
+              Every animal now asks the /decide proxy what to want — run
+              <code> npm run proxy</code>, or they keep the goal they had.
+            </div>
+          )}
+        </div>
+
+        <div className="fa-log">
+          <div className="fa-log-title">Activity log</div>
+          {log.slice(0, logLines).map((entry) => (
+            <div className="fa-log-row" key={entry.id}>
+              <span className="k">{entry.kind === "info" ? "•" : entry.kind}</span>
+              <span>{entry.text}</span>
+            </div>
+          ))}
         </div>
       </div>
+      )}
     </div>
   );
 }
