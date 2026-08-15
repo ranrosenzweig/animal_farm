@@ -402,6 +402,17 @@ export default function FarmModel() {
   }
 
   /** Fill every trough or patch of one kind back up to the brim. */
+  /** Take everything the animals have made since the last time round. */
+  function collect() {
+    const { farm: next, got } = farm.collect();
+    setFarm(next);
+    // "5.6 L of milk" but "3 eggs": a count of a thing needs no "of".
+    const said = got.map((g) => (g.unit
+      ? `${g.amount} ${g.unit} of ${g.label.toLowerCase()}`
+      : `${g.amount} ${g.label.toLowerCase()}`));
+    pushLog(`Collected ${said.join(", ")}.`, "collect");
+  }
+
   function topUp(kind) {
     const { farm: next, added, filled } = farm.topUp(kind);
     if (filled === 0) return;
@@ -1579,15 +1590,29 @@ export default function FarmModel() {
               )}
             </div>
 
+            {/* Two numbers per line, and they mean different things: what the
+                farm makes in a day, and what is standing in the pails waiting
+                to be taken. The second is the one that grows while you watch. */}
             <div className="fa-yield">
-              <span className="lbl">Daily yield</span>
+              <span className="lbl">Yield</span>
               {produce.length === 0
                 ? <span className="none">nothing to collect today</span>
                 : produce.map((p) => (
                     <span className="item" key={p.label}>
-                      {p.label} {p.amount}{p.unit && ` ${p.unit}`}
+                      {p.label} {p.amount}{p.unit && ` ${p.unit}`}/day
+                      <span className="none"> · {p.waiting}{p.unit && ` ${p.unit}`} waiting</span>
                     </span>
                   ))}
+              {produce.length > 0 && (
+                <button
+                  className="fa-btn alt"
+                  style={{ marginLeft: "auto" }}
+                  disabled={!produce.some((p) => p.waiting > 0)}
+                  onClick={collect}
+                >
+                  Collect
+                </button>
+              )}
             </div>
 
           </div>
