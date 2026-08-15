@@ -173,6 +173,15 @@ const ASLEEP = 0.5;
 const between = (low, high, n) => Math.min(high, Math.max(low, n));
 
 /**
+ * What the time of year is worth to whatever an animal makes.
+ *
+ * Milk and eggs follow the light — a hen in a dark December lays a fraction of
+ * what she lays in June — so the length of the day is the whole of it. A bit
+ * over two to one across the year, which is about what a farm sees.
+ */
+export const productivity = (clock) => (clock ? between(0.55, 1.25, clock.daylength / 12) : 1);
+
+/**
  * What the weather and the hour do to how fast a drive climbs.
  *
  * All three come off the same two numbers the farmer can read on the clock:
