@@ -2,12 +2,12 @@ import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomAngle, randomInt } from "./random.js";
 import { GOALS } from "./goals.js";
-import { ROCKS, standable } from "./terrain.js";
+import { OBSTACLES, standable } from "./terrain.js";
 import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
 } from "./physics.js";
-import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
+import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
 import { OPENING, clockAt, clockStep } from "./clock.js";
 
 /**
@@ -104,8 +104,24 @@ export default class Farm {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Put down water or grass. Animals aren't blocked by it and can stand in
-   * it — a trough is somewhere to be, not something to walk around.
+   * The middles of the pools, as circles: water too deep to stand up in, and
+   * so a body to everything that cannot swim. Grass is not here — a patch of
+   * grass is somewhere to be, not something to walk around.
+   *
+   * Worked out fresh each time because a pool shrinks as it is drunk: the
+   * water that barred a cow this morning is a puddle she can cross by dusk.
+   * @returns {{x: number, y: number, radius: number}[]}
+   */
+  pools() {
+    return this.resources
+      .filter((r) => r.kind === "water" && !r.depleted)
+      .map((r) => ({ x: r.x, y: r.y, radius: r.radius * DEEP }));
+  }
+
+  /**
+   * Put down water or grass. Grass is somewhere to be rather than something to
+   * walk around; water is both — animals drink from its rim and only ducks
+   * cross it.
    * @param {"water"|"grass"} kind
    * @param {{x: number, y: number}} at  clamped inside the fence
    * @returns {{ farm: Farm, resource: Resource }}
@@ -339,12 +355,38 @@ export default class Farm {
 
   /**
    * May `mover` stand at `point`? Only if it is inside the fence, clear of the
-   * rocks, and no other animal's personal space reaches it.
+   * rocks, out of its depth in nothing, and no other animal's personal space
+   * reaches it.
    */
   isClear(point, mover) {
     return inBounds(point)
       && standable(point, mover.radius)
+      && this.barriersFor(mover).every((b) => distance(point, b) >= b.radius + mover.radius)
       && this.blockerAt(point, mover) === null;
+  }
+
+  /**
+   * The circles `mover` cannot walk into: the rocks, and — unless it swims —
+   * the deep water. Both are the same thing to the physics, which is why
+   * making a pond solid took no new law: it is a rock that can be drunk.
+   *
+   * A rock stops a body; water stops *feet*. So a pool is handed over shrunk
+   * by the mover's own radius, which is exactly what it takes for the solver
+   * — which works in whole bodies — to leave every animal standing with its
+   * middle on the line where the water gets too deep, large and small alike.
+   * That is the difference between an animal at the water's edge and one
+   * standing a body's width off it looking at the water, and it is what makes
+   * reaching a pond mean drinking from it.
+   */
+  barriersFor(mover, pools = this.pools()) {
+    if (mover.constructor.swims) return OBSTACLES;
+    return [
+      ...OBSTACLES,
+      ...pools
+        .map((pool) => ({ ...pool, radius: pool.radius - mover.radius }))
+        // A puddle narrower than the animal wading in it stops nobody.
+        .filter((pool) => pool.radius > 0),
+    ];
   }
 
   /**
@@ -439,8 +481,15 @@ export default class Farm {
         collide(this.animals[i], this.animals[j]);
       }
     }
+    // One list for the whole round: the pools do not move or shrink mid-step,
+    // and rebuilding them per animal per pass would be the most expensive thing
+    // on the farm.
+    const pools = this.pools();
+    const each = new Map(this.animals.map((a) => [a, this.barriersFor(a, pools)]));
+    const barriers = (animal) => each.get(animal);
+
     for (const animal of this.animals) {
-      for (const rock of ROCKS) collideStatic(animal, rock);
+      for (const rock of barriers(animal)) collideStatic(animal, rock);
       containWithin(animal);
       // Every impulse of this round has now landed on it, so this is where the
       // speed limit belongs — after the shoving, not only after the striding.
@@ -457,7 +506,7 @@ export default class Farm {
       // The ground has the last word: whatever the bodies did to each other,
       // nobody ends up inside a rock or outside the fence.
       for (const animal of this.animals) {
-        for (const rock of ROCKS) deepest = Math.max(deepest, separateStatic(animal, rock));
+        for (const rock of barriers(animal)) deepest = Math.max(deepest, separateStatic(animal, rock));
         deepest = Math.max(deepest, confine(animal));
       }
       // One test for all three, and it is "did anything have to move much?".

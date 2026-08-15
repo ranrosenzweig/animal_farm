@@ -82,20 +82,22 @@ export const GROUND = {
   mud: { kind: "mud", label: "Mud", drag: 2.2, passable: true },
   wood: { kind: "wood", label: "Woodland", drag: 1.6, passable: true },
   rock: { kind: "rock", label: "Rock", drag: 1, passable: false },
+  barn: { kind: "barn", label: "Barn", drag: 1, passable: false },
 };
 
 /**
  * The patches of ground that are not meadow, as circles in pasture units.
  * Order matters only where two overlap: the first one wins.
  *
- * Rocks carry a placement rule the soft patches do not, because they are the
- * only ones an animal cannot walk through: **a rock must stand far enough from
- * the fence that the biggest animal still fits between the two**. Otherwise
- * the pocket between rock and rail has no legal ground in it at all, and a cow
- * that wanders in gets shoved off the rail by one rule and out of the stone by
- * the other, for as many passes as the solver will give it. `npm run check`
- * asserts this, because it is invisible until a large animal happens to walk
- * into exactly that gap.
+ * The solid ones carry a placement rule the soft patches do not: **the gap
+ * between a solid patch and the fence must be either wide enough for the
+ * biggest animal, or no gap at all**. A pocket narrower than an animal has no
+ * legal ground in it, and a cow that wanders in gets shoved off the rail by one
+ * rule and out of the stone by the other, for as many passes as the solver will
+ * give it. A building standing *across* the rail is fine, because there is
+ * nothing behind it to be trapped in — which is what lets the barn sit in the
+ * corner of the field, where a barn belongs. `npm run check` asserts this; it
+ * is invisible until a large animal walks into exactly that gap.
  */
 export const PATCHES = [
   { ground: "mud", x: MUD.x, y: MUD.y, radius: 9 },
@@ -104,10 +106,13 @@ export const PATCHES = [
   { ground: "wood", x: 86, y: 70, radius: 7 },
   { ground: "rock", x: 55, y: 29, radius: 4 },
   { ground: "rock", x: 40, y: 62, radius: 3.5 },
+  // Across the north-east corner, so its walls cross both rails and no animal
+  // can end up behind it. The UI draws the building on this very spot.
+  { ground: "barn", x: 88, y: 18, radius: 5.5 },
 ];
 
 /** The patches nothing can walk through — static bodies, for the physics. */
-export const ROCKS = PATCHES.filter((patch) => !GROUND[patch.ground].passable);
+export const OBSTACLES = PATCHES.filter((patch) => !GROUND[patch.ground].passable);
 
 const covers = (patch, { x, y }) =>
   Math.hypot(x - patch.x, y - patch.y) < patch.radius;
@@ -119,26 +124,26 @@ export function groundAt(point) {
 }
 
 /**
- * How far a body of `radius` standing at `point` reaches inside a rock, in
- * pasture units. 0 when it is clear of them, which is what a body leaning on
- * one reads as give or take a rounding error.
+ * How far a body of `radius` standing at `point` reaches inside a rock or a
+ * wall, in pasture units. 0 when it is clear of them all, which is what a body
+ * leaning on one reads as give or take a rounding error.
  */
-export function rockPenetration(point, radius = 0) {
+export function obstaclePenetration(point, radius = 0) {
   let deepest = 0;
-  for (const rock of ROCKS) {
-    deepest = Math.max(deepest, rock.radius + radius - Math.hypot(point.x - rock.x, point.y - rock.y));
+  for (const solid of OBSTACLES) {
+    deepest = Math.max(deepest, solid.radius + radius - Math.hypot(point.x - solid.x, point.y - solid.y));
   }
   return deepest;
 }
 
 /**
- * Is there room here for a body of `radius` — that is, does it clear the
- * rocks? Says nothing about the fence or about other animals; the Farm asks
- * about those separately. Strict, because it is asked when *placing* an
- * animal, and there is no reason to set one down touching a rock.
+ * Is there room here for a body of `radius` — that is, does it clear the rocks
+ * and the barn? Says nothing about the fence or about other animals; the Farm
+ * asks about those separately. Strict, because it is asked when *placing* an
+ * animal, and there is no reason to set one down touching a wall.
  */
 export function standable(point, radius = 0) {
-  return rockPenetration(point, radius) <= 0;
+  return obstaclePenetration(point, radius) <= 0;
 }
 
 /**

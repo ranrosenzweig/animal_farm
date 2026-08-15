@@ -30,6 +30,15 @@ export const RESOURCE_KINDS = {
 
 export const RESOURCE_NAMES = Object.keys(RESOURCE_KINDS);
 
+/**
+ * How much of a pool is over an animal's head, as a fraction of its radius.
+ * The rim is shallow — anything can wade in that far to drink — and the middle
+ * is water it would have to swim. Under 1 for a reason: a body held off at the
+ * deep edge is still well inside the reach the `drink` goal measures, so
+ * making water solid did not put drinking out of anyone's range.
+ */
+export const DEEP = 0.7;
+
 export default class Resource {
   /**
    * @param {"water"|"grass"} kind

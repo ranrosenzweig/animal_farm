@@ -101,6 +101,13 @@ const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
  */
 const TREE_SPOTS = [[-0.45, -0.2], [0.4, -0.42], [0.02, 0.34], [-0.15, -0.62]];
 
+/**
+ * Where the barn stands — read off the terrain rather than placed by eye, so
+ * the building on screen is the one the animals bump into. Unlike the trees,
+ * which are scenery over walkable woodland, this one is a wall.
+ */
+const BARN = PATCHES.find((patch) => patch.ground === "barn");
+
 const TREES = PATCHES.filter((patch) => patch.ground === "wood").flatMap((patch, w) =>
   TREE_SPOTS.map(([dx, dy], t) => ({
     key: `${w}-${t}`,
@@ -793,6 +800,14 @@ export default function FarmModel() {
         .fa-ground-rock {
           background: radial-gradient(ellipse at 42% 30%, #bcbbb4 0%, #8b8b86 45%, #4a4a47 100%);
           box-shadow: 0 3px 5px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.35);
+        }
+        /* The yard the barn stands on, drawn at exactly the radius animals
+           bounce off — the building is a wall, not scenery, and the footprint
+           is what says so. Bare earth: nothing grows where the herd mills. */
+        .fa-ground-barn {
+          background: radial-gradient(ellipse at 50% 45%, #a08a63 0%, #7d6a48 65%, #5e4f36 100%);
+          box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);
+          opacity: 0.75;
         }
         /* Trees stand on the woodland patches. Woodland only slows an animal,
            so they are scenery over real ground rather than obstacles. */
@@ -1674,7 +1689,7 @@ export default function FarmModel() {
           {/* The mud is no longer a landmark laid on the field — it is one of
               the terrain's patches now, and gets drawn with the rest of them. */}
           <PastureTerrain />
-          <div className="fa-barn" style={standing({ x: 84, y: 18 })}>🏚️</div>
+          <div className="fa-barn" style={standing(BARN)}>🏚️</div>
           {TREES.map((tree) => (
             <div key={tree.key} className="fa-tree" style={standing(tree)} aria-hidden="true">🌳</div>
           ))}
