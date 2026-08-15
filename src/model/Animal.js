@@ -6,6 +6,7 @@ import { RESOURCE_NAMES } from "./Resource.js";
 import { groundAt, slopeAt } from "./terrain.js";
 import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
+import { awake, metabolism, urgency } from "./clock.js";
 
 /**
  * Abstract base for every animal on the farm.
@@ -70,6 +71,13 @@ export default class Animal {
   static affinities = {
     graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4, mate: 0.7,
   };
+
+  /**
+   * @type {boolean} Whether this kind keeps to the dark. Nearly nothing on a
+   * farm does, so the default is to be up with the sun — but it is a plain
+   * static, so a species that leaves it out simply inherits the daylight.
+   */
+  static nocturnal = false;
 
   /** @type {Record<string, number>} How fast each drive climbs, per step. */
   static driveRates = {
@@ -294,7 +302,19 @@ export default class Animal {
    * @returns {import("./minds/Mind.js").Percept}
    */
   perceive({ neighbors = [], farm } = {}) {
+    const clock = farm?.clock;
     return {
+      // The hour of the day and the time of year, as any animal can tell them:
+      // how high the sun is, whether it is up, and what the season is doing.
+      time: clock && {
+        hour: clock.time,
+        phase: clock.phase,
+        daylight: clock.daylight,
+        season: clock.season,
+        sky: clock.sky,
+        tempC: Math.round(clock.tempC),
+        awake: awake(clock, this.constructor.nocturnal),
+      },
       self: {
         name: this.name,
         species: this.species,
@@ -344,8 +364,13 @@ export default class Animal {
    */
   pressureFor(goalName, context = {}) {
     const goal = GOALS[goalName];
-    if (!goal?.relieves) return this.constructor.baselinePressure;
-    const pressure = this.drives[goal.relieves];
+    // The hour has the last word on every want: an animal in its own night
+    // wants to sleep, and wants everything else a good deal less.
+    const atThisHour = (pressure) =>
+      urgency(pressure, goal?.relieves, context.farm?.clock, this.constructor.nocturnal);
+
+    if (!goal?.relieves) return atThisHour(this.constructor.baselinePressure);
+    const pressure = atThisHour(this.drives[goal.relieves]);
     if (goal.anywhere || goal.place(this, context) != null) return pressure;
     return pressure * this.constructor.unreachable;
   }
@@ -369,8 +394,13 @@ export default class Animal {
   /** Drives climb; the one being served falls only if there was anything to take. */
   feel(context = {}) {
     const rates = this.constructor.driveRates;
+    const clock = context.farm?.clock;
     for (const drive of DRIVES) {
-      this.drives[drive] = clamp01(this.drives[drive] + (rates[drive] ?? 0));
+      // A drive climbs at its own pace, but the season and the hour set how
+      // fast that pace runs: cold makes it hungry, a dry summer makes it
+      // thirsty, and everything slows while it sleeps.
+      const pace = metabolism(drive, clock, this.constructor.nocturnal);
+      this.drives[drive] = clamp01(this.drives[drive] + (rates[drive] ?? 0) * pace);
     }
 
     const relief = this.constructor.relief;
@@ -723,6 +753,7 @@ export default class Animal {
       { label: "Sex", value: this.sex === "female" ? "♀ female" : "♂ male" },
       { label: "Breed", value: this.breed },
       { label: "Age", value: this.isAdult ? `${this.age} yr` : "newborn" },
+      { label: "Awake", value: this.constructor.nocturnal ? "at night" : "by day" },
       { label: "Favorite food", value: this.favoriteFood },
     ];
   }

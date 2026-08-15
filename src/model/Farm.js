@@ -8,6 +8,7 @@ import {
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
 } from "./physics.js";
 import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
+import { OPENING, clockAt, clockStep } from "./clock.js";
 
 /**
  * The farm itself: a named place that holds animals and can answer
@@ -27,12 +28,18 @@ export default class Farm {
    * @param {string} name
    * @param {import("./Animal.js").default[]} animals
    * @param {Resource[]} resources  water and grass, which run out
+   * @param {number} steps  quarter-hours since the year began; a farm opens on
+   *   a spring morning rather than at midnight in January
    */
-  constructor(name = "The Farm", animals = [], resources = []) {
+  constructor(name = "The Farm", animals = [], resources = [], steps = OPENING) {
     this.name = name;
     this.animals = animals;
     this.resources = resources;
+    this.steps = steps;
   }
+
+  /** The hour, the day and the season. Everything about time comes from here. */
+  get clock() { return clockAt(this.steps); }
 
   /** A farm stocked with one of every species, a pond and two patches of grass. */
   static starter(name = "The Farm") {
@@ -59,12 +66,15 @@ export default class Farm {
     const spot = this.freeSpotFor(animal);
     if (!spot) return { farm: this, added: false };
     animal.moveTo(spot);
-    return { farm: new Farm(this.name, [...this.animals, animal], this.resources), added: true };
+    return {
+      farm: new Farm(this.name, [...this.animals, animal], this.resources, this.steps),
+      added: true,
+    };
   }
 
   /** @returns {Farm} a new farm without the animal carrying `id`. */
   remove(id) {
-    return new Farm(this.name, this.animals.filter((a) => a.id !== id), this.resources);
+    return new Farm(this.name, this.animals.filter((a) => a.id !== id), this.resources, this.steps);
   }
 
   find(id) {
@@ -103,7 +113,7 @@ export default class Farm {
   addResource(kind, at, options) {
     const resource = new Resource(kind, clampToPasture(at), options);
     return {
-      farm: new Farm(this.name, this.animals, [...this.resources, resource]),
+      farm: new Farm(this.name, this.animals, [...this.resources, resource], this.steps),
       resource,
     };
   }
@@ -128,7 +138,7 @@ export default class Farm {
         filled += 1;
       }
     }
-    return { farm: new Farm(this.name, this.animals, this.resources), added, filled };
+    return { farm: new Farm(this.name, this.animals, this.resources, this.steps), added, filled };
   }
 
   /**
@@ -279,8 +289,11 @@ export default class Farm {
       const baby = mother.newborn();
       // Beside its mother if there is room there, and only failing that
       // wherever the field has a gap.
+      // The field the spot is judged against is the one from the start of the
+      // round, so a second birth in the same round has to be checked against
+      // the first by hand — otherwise twins arrive standing in each other.
       const spot = this.freeSpotNear(mother, baby) ?? this.freeSpotFor(baby);
-      if (!spot) continue; // no room in the field; the birth waits
+      if (!spot || born.some((other) => baby.wouldCrowd(spot, other))) continue;
       baby.name = this.unusedName(baby.name);
       baby.moveTo(spot);
       // The two of them know each other from the first step, without having
@@ -560,15 +573,37 @@ export default class Farm {
   }
 
   /**
+   * What the weather puts back. Rain fills the troughs and brings the grass
+   * on; snow only melts into the water. It is a trickle beside what a herd
+   * takes out — a wet week eases the chores, it does not do them.
+   * @returns {number} how much went in, over every source
+   * @private
+   */
+  water() {
+    const { sky, precipitation } = this.clock;
+    if (sky === "clear") return 0;
+    let added = 0;
+    for (const resource of this.resources) {
+      if (resource.kind === "grass" && sky !== "rain") continue;
+      added += resource.refill(precipitation * (resource.kind === "water" ? 0.8 : 0.25));
+    }
+    return added;
+  }
+
+  /**
    * The farm as it stands after a round: the young are on the field, the dead
-   * are off it, and the drained sources are gone.
+   * are off it, the drained sources are gone, and a quarter of an hour has
+   * passed. Every round goes through here, so this is the only place the clock
+   * advances — and the only place the weather gets to fall on the field.
    * @private
    */
   settled(born = []) {
+    this.water();
     return new Farm(
       this.name,
       [...this.animals.filter((a) => a.isAlive()), ...born],
       this.resources.filter((r) => !r.depleted),
+      this.steps + clockStep(),
     );
   }
 
