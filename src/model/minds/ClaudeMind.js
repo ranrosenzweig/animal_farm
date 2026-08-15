@@ -28,9 +28,8 @@ export default class ClaudeMind extends Mind {
    *   forwards /decide; a script under Node needs the whole URL.
    */
   constructor({ endpoint = "/decide", cadence } = {}) {
-    super();
+    super({ cadence });
     this.endpoint = endpoint;
-    this.overrideCadence = cadence;
     /** @type {import("./Mind.js").Intention | null} the last answer received */
     this.latched = null;
     /** A request is already out; asking again on top of it just costs money. */
@@ -38,8 +37,6 @@ export default class ClaudeMind extends Mind {
     /** Why the last request failed, or null while it is working. */
     this.error = null;
   }
-
-  get cadence() { return this.overrideCadence ?? ClaudeMind.cadence; }
 
   /**
    * @param {import("./Mind.js").Percept} percept

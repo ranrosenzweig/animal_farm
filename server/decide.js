@@ -18,13 +18,9 @@
  *
  *   npm run proxy
  */
-import { config } from "dotenv";
 import { createServer } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
 import { GOAL_NAMES } from "../src/model/goals.js";
-
-const env = config().parsed ?? {};
-Object.assign(process.env, env);
 
 const PORT = Number(process.env.PORT ?? 8787);
 /**

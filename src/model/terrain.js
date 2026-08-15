@@ -29,26 +29,8 @@ export const RELIEF = [
   { x: 18, y: 70, height: -0.24, spread: 22 },        // low ground, where the pond lies
 ];
 
-/** Height of the ground with no bump under it. Puts the field mid-range. */
-const SEA_LEVEL = 0.36;
-
 /**
- * How high the ground stands, roughly 0 (lowest hollow) to 1 (highest rise).
- * The scale is arbitrary; only differences matter, because only the slope is
- * ever used for anything.
- */
-export function elevationAt({ x, y }) {
-  let height = SEA_LEVEL;
-  for (const bump of RELIEF) {
-    const dx = x - bump.x;
-    const dy = y - bump.y;
-    height += bump.height * Math.exp(-(dx * dx + dy * dy) / (bump.spread * bump.spread));
-  }
-  return height;
-}
-
-/**
- * Which way the ground rises, and how steeply: the gradient of `elevationAt`,
+ * Which way the ground rises, and how steeply: the gradient of the relief,
  * worked out exactly rather than sampled. Gravity pulls the other way.
  *
  * @returns {{x: number, y: number}} rise per pasture unit, along each axis

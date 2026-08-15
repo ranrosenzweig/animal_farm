@@ -38,19 +38,17 @@ export const RESOURCE_KINDS = {
   water: {
     kind: "water",
     label: "Water",
-    names: ["Pond", "Lake", "Trough", "Stream"],
+    name: "Pond",
     capacity: 100,
     spread: 11,     // radius at full, in pasture units
-    color: "#3E7CA6",
     unit: "L",
   },
   grass: {
     kind: "grass",
     label: "Grass",
-    names: ["Meadow", "Pasture", "Clover patch", "Hay"],
+    name: "Meadow",
     capacity: 60,
     spread: 9,
-    color: "#5c8a3c",
     unit: "kg",
   },
 };
@@ -89,13 +87,11 @@ export default class Resource {
     this.y = at.y;
     this.capacity = spec.capacity;
     this.volume = volume ?? spec.capacity;
-    this.name = name ?? spec.names[0];
+    this.name = name ?? spec.name;
   }
 
   get spec() { return RESOURCE_KINDS[this.kind]; }
-  get label() { return this.spec.label; }
   get unit() { return this.spec.unit; }
-  get color() { return this.spec.color; }
 
   /** 0 when drained, 1 when brim-full. */
   get fullness() { return this.capacity === 0 ? 0 : this.volume / this.capacity; }
