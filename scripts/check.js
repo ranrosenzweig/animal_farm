@@ -26,7 +26,7 @@ import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.j
 import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
-import Resource from "../src/model/Resource.js";
+import Resource, { setHeldLevels } from "../src/model/Resource.js";
 
 // A different farm every run, but never an unrepeatable one. The check earns
 // its keep by exploring trajectories a fixed seed would never reach — it has
@@ -253,6 +253,40 @@ if (bare.size > 0) {
   console.log(`Famine: all ${buried} of ${startedWith} animals died within ${famineRounds} rounds ` +
     `on an empty field (of ${[...causes].join(" and ")}).`);
 }
+
+// Held levels: the opposite of famine. What is held is the reading, not the
+// supply, so a held source pays a full mouthful whatever it says — even empty
+// — and never hides itself from the drink goal. The old bug served a mouthful
+// the size of what was left, which meant a herd dying of thirst beside a pond
+// whose level obligingly never fell.
+setHeldLevels(true);
+const puddle = new Resource("water", { x: 15, y: 25 }, { volume: 0 });
+if (puddle.draw(1.1) !== 1.1) fail("held: an empty held pond served a short drink");
+if (puddle.volume !== 0) fail(`held: the reading moved to ${puddle.volume}`);
+if (puddle.depleted) fail("held: an empty held pond hid itself from the drink goal");
+if (puddle.refill(50) !== 0 || puddle.volume !== 0) fail("held: a held pond took a top-up");
+
+// And end to end: a herd drinking and grazing for a long time must not move
+// the reading by a drop. Deliberately not asserted on who survives — holding
+// the levels is not a promise that nothing ever dies. An animal still has to
+// walk to the water, still gives way at a crowded trough, and still follows
+// whichever drive is loudest, so a chicken whose hunger outruns its thirst can
+// die parched with a full pond across the field. That is the mind's business,
+// not the trough's.
+let pinned = new Farm("Held", [], [
+  new Resource("water", { x: 15, y: 25 }, { volume: 50 }),
+  new Resource("grass", { x: 35, y: 45 }, { volume: 30 }),
+]);
+for (const Species of SPECIES) pinned = pinned.add(Species.random()).farm;
+const pinnedHerd = pinned.size;
+const levels = pinned.resources.map((r) => r.volume);
+for (let round = 1; round <= 1200; round++) pinned = pinned.stepAll().farm;
+if (pinned.resources.some((r, i) => r.volume !== levels[i])) {
+  fail(`held: levels moved — ${pinned.resources.map((r) => r.volume).join(", ")} against ${levels.join(", ")}`);
+}
+setHeldLevels(false);
+console.log(`Held levels: ${pinnedHerd} animals drank and grazed for 1200 rounds and left the ` +
+  `field reading ${levels.join(" and ")}, exactly as it started (${pinned.size} still alive).`);
 
 // Breeding: a pair must produce young of their own species, and nothing else.
 // Well supplied and topped up, so this measures breeding and not starvation.

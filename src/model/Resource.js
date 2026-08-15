@@ -92,7 +92,10 @@ export default class Resource {
   /** 0 when drained, 1 when brim-full. */
   get fullness() { return this.capacity === 0 ? 0 : this.volume / this.capacity; }
 
-  get depleted() { return this.volume <= 0; }
+  // Never while held: `Farm.nearestResource` skips a depleted source, so a
+  // held-at-empty pond would be invisible to the drink goal for good — the
+  // animals would have nowhere to go and would die of thirst beside it.
+  get depleted() { return !held && this.volume <= 0; }
 
   /**
    * How far it spreads. Area scales with what's left, so a drained pond is a
@@ -106,13 +109,16 @@ export default class Resource {
    * Take up to `amount`. A resource can only give what it has.
    *
    * Held sources are the exception: the animal gets its whole mouthful and the
-   * level does not move. Every drink and every mouthful in the model comes
-   * through here, so this one line is the whole of it.
+   * level does not move — whatever the level happens to say, including empty.
+   * What is held is the reading, not the supply, so a pond held low waters the
+   * herd exactly as well as a full one. Every drink and every mouthful in the
+   * model comes through here, so this one line is the whole of it.
    * @returns {number} how much was actually drawn — 0 when it's dry
    */
   draw(amount) {
+    if (held) return amount;
     const taken = Math.min(amount, this.volume);
-    if (!held) this.volume -= taken;
+    this.volume -= taken;
     return taken;
   }
 

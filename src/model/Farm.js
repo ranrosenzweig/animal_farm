@@ -114,7 +114,10 @@ export default class Farm {
    */
   pools() {
     return this.resources
-      .filter((r) => r.kind === "water" && !r.depleted)
+      // On the water itself, not on `depleted`: a held source is never
+      // depleted — it always has a drink in it — but a pond reading zero still
+      // shows a dry bed, and a dry bed is not something to walk around.
+      .filter((r) => r.kind === "water" && r.volume > 0)
       .map((r) => ({ x: r.x, y: r.y, radius: r.radius * DEEP }));
   }
 
