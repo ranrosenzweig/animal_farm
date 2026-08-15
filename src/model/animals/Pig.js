@@ -13,6 +13,10 @@ export default class Pig extends Animal {
   static radius = 5;
   static turnRate = 0.35;
 
+  // The one animal here that keeps its own hours: a pig forages in the cool of
+  // the night and sleeps off the heat of the day, in the mud for preference.
+  static nocturnal = true;
+
   // The only animal here that would rather wallow than rest.
   static affinities = { wallow: 1.0, graze: 0.8, drink: 0.6, rest: 0.2, flock: 0.3, roam: 0.4, mate: 0.7 };
   static driveRates = { hunger: 0.006, thirst: 0.005, fatigue: 0.005, loneliness: 0.003, urge: 0.004 };

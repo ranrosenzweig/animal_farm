@@ -11,6 +11,7 @@
  * a language model, without either one knowing about the other.
  *
  * @typedef {{
+ *   time: { hour: string, phase: string, daylight: boolean, season: string, awake: boolean },
  *   self: { name: string, species: string, goal: string, drives: Record<string, number> },
  *   options: { goal: string, affinity: number, pressure: number }[],
  *   nearby: { name: string, species: string, distance: number, familiarity: number }[],
