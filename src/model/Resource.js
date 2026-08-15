@@ -66,6 +66,14 @@ export const RESOURCE_NAMES = Object.keys(RESOURCE_KINDS);
  */
 export const DEEP = 0.7;
 
+/**
+ * How much harder water is to move through than meadow, for anything with any
+ * part of itself in it. On the same scale as the ground in `terrain.js`, and
+ * heavier than mud — a duck paddles slower than it waddles, and a cow at the
+ * rim is wading, not walking.
+ */
+export const WATER_DRAG = 2.6;
+
 export default class Resource {
   /**
    * @param {"water"|"grass"} kind

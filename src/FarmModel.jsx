@@ -73,6 +73,10 @@ function standing(spot) {
     top: `${spot.y}%`,
     "--depth-scale": sizeAt(spot.y),
     "--haze": 0.7 + 0.3 * depthAt(spot.y),
+    // Which way it is pointed, for anything that has a facing. Every animal
+    // glyph is drawn looking left, so one heading east has to be turned about
+    // or it walks backwards across the field — which is what it looked like.
+    "--face": spot.facing !== undefined && Math.cos(spot.facing) > 0 ? -1 : 1,
     // Nearer animals occlude further ones. The fence sits above the lot.
     zIndex: Math.round(spot.y * 10),
   };
@@ -99,26 +103,14 @@ const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
   `${project({ x: 100, y: HORIZON }).x}% 0, 100% 100%, 0 100%)`;
 
 /**
- * Where the trees stand in each wood, as fractions of the patch's radius.
- * Fixed rather than random: the ground under them does not move between
- * renders, so neither should they.
- */
-const TREE_SPOTS = [[-0.45, -0.2], [0.4, -0.42], [0.02, 0.34], [-0.15, -0.62]];
-
-/**
- * Where the barn stands — read off the terrain rather than placed by eye, so
- * the building on screen is the one the animals bump into. Unlike the trees,
- * which are scenery over walkable woodland, this one is a wall.
+ * The barn and the trunks — read off the terrain rather than placed by eye, so
+ * what stands on screen is what the animals bump into. Both are solid patches;
+ * the woodland they stand on is not.
  */
 const BARN = PATCHES.find((patch) => patch.ground === "barn");
 
-const TREES = PATCHES.filter((patch) => patch.ground === "wood").flatMap((patch, w) =>
-  TREE_SPOTS.map(([dx, dy], t) => ({
-    key: `${w}-${t}`,
-    x: patch.x + dx * patch.radius,
-    y: patch.y + dy * patch.radius,
-  })),
-);
+const TREES = PATCHES.filter((patch) => patch.ground === "tree")
+  .map((patch, t) => ({ key: `tree-${t}`, x: patch.x, y: patch.y }));
 
 /**
  * The lie of the land, drawn from the very numbers the animals walk on.
@@ -1025,8 +1017,15 @@ export default function FarmModel() {
           box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);
           opacity: 0.75;
         }
-        /* Trees stand on the woodland patches. Woodland only slows an animal,
-           so they are scenery over real ground rather than obstacles. */
+        /* The foot of each trunk, drawn at exactly the radius animals bounce
+           off — same rule as the rock and the barn. Woodland underneath is
+           still walkable; the trunk standing on it is not. */
+        .fa-ground-tree {
+          background: radial-gradient(ellipse at 50% 45%, #4a3a24 0%, #2f2415 100%);
+          opacity: 0.7;
+        }
+        /* Trees stand on the woodland patches, one emoji per trunk in the
+           model, so what you see is what they walk around. */
         .fa-tree {
           position: absolute;
           transform: translate(-50%, -62%) scale(var(--depth-scale, 1));
@@ -1093,7 +1092,11 @@ export default function FarmModel() {
           position: relative;
           font-size: 30px;
           filter: drop-shadow(0 2px 1px rgba(0,0,0,0.22)) saturate(var(--haze, 1));
-          transform: scale(var(--depth-scale, 1));
+          /* Turned about when it is heading east, and only the glyph — a name
+             tag read backwards is worse than a cow read backwards. The step
+             transition below carries the flip, so an animal turning round
+             narrows and swings rather than snapping. */
+          transform: scale(var(--depth-scale, 1)) scaleX(var(--face, 1));
           /* Its feet are what stand on the ground, so scale from there. */
           transform-origin: 50% 100%;
           transition: transform var(--step-duration, 600ms) linear;

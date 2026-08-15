@@ -83,7 +83,27 @@ export const GROUND = {
   wood: { kind: "wood", label: "Woodland", drag: 1.6, passable: true },
   rock: { kind: "rock", label: "Rock", drag: 1, passable: false },
   barn: { kind: "barn", label: "Barn", drag: 1, passable: false },
+  tree: { kind: "tree", label: "Tree", drag: 1.6, passable: false },
 };
+
+/**
+ * The trunks standing in the woods. Small circles, because a trunk is small —
+ * but solid ones: woodland is ground you can cross, and a tree is a thing you
+ * go round.
+ *
+ * They sit on the inland side of each wood rather than spread evenly through
+ * it, and that is not an aesthetic choice. Every wood here runs up against a
+ * fence, and a trunk in the strip between wood and rail would leave a pocket
+ * of ground too narrow for an animal to stand in — the same fault the rocks
+ * are placed to avoid. So the fence side of each wood is clear, the way the
+ * edge of a real wood is the part that gets cleared.
+ */
+const TRUNK = 1.2;
+const TRUNKS = [
+  [14.5, 27.5],   // the big west wood
+  [28, 23.5],     // the north-west copse
+  [82.5, 68],     // the east wood
+].map(([x, y]) => ({ ground: "tree", x, y, radius: TRUNK }));
 
 /**
  * The patches of ground that are not meadow, as circles in pasture units.
@@ -109,6 +129,9 @@ export const PATCHES = [
   // Across the north-east corner, so its walls cross both rails and no animal
   // can end up behind it. The UI draws the building on this very spot.
   { ground: "barn", x: 88, y: 18, radius: 5.5 },
+  // Last, so the woodland underneath still answers for the going: a tree is
+  // something in the way, not a different kind of ground.
+  ...TRUNKS,
 ];
 
 /** The patches nothing can walk through — static bodies, for the physics. */
