@@ -1,3 +1,5 @@
+import { random } from "./random.js";
+
 /**
  * What an animal feels. Drives run 0 (satisfied) to 1 (desperate), rise on
  * their own, and fall only while the animal is doing something about them.
@@ -19,5 +21,5 @@ export const DRIVE_LABELS = {
 export const clamp01 = (n) => Math.min(1, Math.max(0, n));
 
 /** A fresh set of drives, each starting somewhere unremarkable. */
-export const startingDrives = (random = Math.random) =>
+export const startingDrives = () =>
   Object.fromEntries(DRIVES.map((d) => [d, clamp01(random() * 0.4)]));
