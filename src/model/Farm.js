@@ -795,9 +795,4 @@ export default class Farm {
       .sort((a, b) => b.amount - a.amount);
     return { farm: new Farm(this.name, this.animals, this.resources, this.steps), got };
   }
-
-  /** Feed every animal; returns what happened, one line per animal. */
-  feedAll() {
-    return this.animals.map((a) => a.eat());
-  }
 }
