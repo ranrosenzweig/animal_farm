@@ -6,7 +6,9 @@ import { RESOURCE_NAMES } from "./Resource.js";
 import { groundAt, slopeAt } from "./terrain.js";
 import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
-import { STEPS_PER_DAY, awake, clockStep, metabolism, urgency } from "./clock.js";
+import {
+  STEPS_PER_DAY, awake, clockStep, metabolism, productivity, urgency,
+} from "./clock.js";
 
 /**
  * Abstract base for every animal on the farm.
@@ -434,7 +436,7 @@ export default class Animal {
       this.drives[goal.relieves] = clamp01(this.drives[goal.relieves] - (relief / 4) * share);
     }
 
-    this.grow();
+    this.grow(clock);
     this.wear();
   }
 
@@ -444,7 +446,7 @@ export default class Animal {
    * a little further.
    * @private
    */
-  grow() {
+  grow(clock) {
     this.stepsAlive += 1;
     if (this.age === 0 && this.stepsAlive >= this.constructor.maturesAt) this.age = 1;
     if (this.pregnancy) this.pregnancy.left -= 1;
@@ -452,9 +454,13 @@ export default class Animal {
 
     // Made by the hour rather than appearing in a lump at midnight, so a farm
     // watched for half a day has half a day's milk in it. Nothing comes from
-    // the young, and an animal in poor condition gives less.
+    // the young, an animal in poor condition gives less, and a short winter
+    // day gives less again.
     const rate = this.isAdult ? this.dailyProduce() : null;
-    if (rate) this.yielded += (rate.amount * this.health * clockStep()) / STEPS_PER_DAY;
+    if (rate) {
+      const made = rate.amount * this.health * productivity(clock);
+      this.yielded += (made * clockStep()) / STEPS_PER_DAY;
+    }
   }
 
   /**
@@ -471,27 +477,18 @@ export default class Animal {
   }
 
   /**
-   * How much of a goal's full relief being here has earned, 0–1. A goal that
-   * consumes is limited by what its source could give; one that sets its own
-   * `worth` is limited by that; anything else pays in full.
+   * How much of a goal's full relief being here has earned, 0–1.
+   *
+   * Two limits, and a goal can be under both: what its source could give, and
+   * what the goal itself says being here is worth just now. Grass under frost
+   * is the case that needs both — the patch has plenty in it, and the animal
+   * still cannot get a full mouthful out of frozen ground.
    * @returns {number}
    * @private
    */
   shareOf(goal, context) {
-    if (goal.consumes) return this.consume(goal, context);
-    return goal.worth ? goal.worth(this, context) : 1;
-  }
-
-  /**
-   * How much of a goal's full relief being here has earned, 0–1. A goal that
-   * consumes is limited by what its source could give; one that sets its own
-   * `worth` is limited by that; anything else pays in full.
-   * @returns {number}
-   * @private
-   */
-  shareOf(goal, context) {
-    if (goal.consumes) return this.consume(goal, context);
-    return goal.worth ? goal.worth(this, context) : 1;
+    const conditions = goal.worth ? goal.worth(this, context) : 1;
+    return goal.consumes ? this.consume(goal, context) * conditions : conditions;
   }
 
   /**
