@@ -660,8 +660,9 @@ export default class Farm {
   }
 
   /**
-   * Everything the farm yields in a day, summed across animals.
-   * @returns {{ label: string, amount: number, unit: string }[]}
+   * Everything the farm yields, summed across animals: `amount` is what it
+   * makes in a day, `waiting` is what is standing in the pails right now.
+   * @returns {{ label: string, amount: number, unit: string, waiting: number }[]}
    */
   dailyProduce() {
     const totals = new Map();
@@ -669,10 +670,40 @@ export default class Farm {
       const yieldOf = animal.dailyProduce();
       if (!yieldOf) continue;
       const running = totals.get(yieldOf.label);
-      if (running) running.amount += yieldOf.amount;
-      else totals.set(yieldOf.label, { ...yieldOf });
+      if (running) {
+        running.amount += yieldOf.amount;
+        running.waiting += animal.yielded;
+      } else {
+        totals.set(yieldOf.label, { ...yieldOf, waiting: animal.yielded });
+      }
     }
-    return [...totals.values()].map((t) => ({ ...t, amount: Math.round(t.amount * 10) / 10 }));
+    return [...totals.values()].map((t) => ({
+      ...t,
+      amount: Math.round(t.amount * 10) / 10,
+      waiting: Math.round(t.waiting * 10) / 10,
+    }));
+  }
+
+  /**
+   * Take the milk, the eggs and the wool. Empties every animal, so what comes
+   * back is the whole of what the farm has made since the last time.
+   * @returns {{ farm: Farm, got: { label: string, amount: number, unit: string }[] }}
+   *   `got` is biggest first, and empty when there was nothing in the pails
+   */
+  collect() {
+    const totals = new Map();
+    for (const animal of this.animals) {
+      const got = animal.collect();
+      if (!got) continue;
+      const running = totals.get(got.label);
+      if (running) running.amount += got.amount;
+      else totals.set(got.label, { ...got });
+    }
+    const got = [...totals.values()]
+      .map((t) => ({ ...t, amount: Math.round(t.amount * 10) / 10 }))
+      .filter((t) => t.amount > 0)
+      .sort((a, b) => b.amount - a.amount);
+    return { farm: new Farm(this.name, this.animals, this.resources, this.steps), got };
   }
 
   /** Feed every animal; returns what happened, one line per animal. */

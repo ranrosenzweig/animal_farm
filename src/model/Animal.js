@@ -6,7 +6,7 @@ import { RESOURCE_NAMES } from "./Resource.js";
 import { groundAt, slopeAt } from "./terrain.js";
 import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
-import { awake, metabolism, urgency } from "./clock.js";
+import { STEPS_PER_DAY, awake, clockStep, metabolism, urgency } from "./clock.js";
 
 /**
  * Abstract base for every animal on the farm.
@@ -182,6 +182,8 @@ export default class Animal {
     this.pregnancy = null;
     /** Steps lived, which is how a newborn grows up. */
     this.stepsAlive = 0;
+    /** What it has made since it was last collected from, in its own unit. */
+    this.yielded = 0;
     /** `{ mother, father, species }` for animals that were born here, else null. */
     this.parents = null;
     /**
@@ -430,8 +432,9 @@ export default class Animal {
   }
 
   /**
-   * Time passing: a newborn fills out into an adult, and a female carrying
-   * young gets one step closer to delivering.
+   * Time passing: a newborn fills out into an adult, a female carrying young
+   * gets one step closer to delivering, and whatever the animal makes fills up
+   * a little further.
    * @private
    */
   grow() {
@@ -439,6 +442,25 @@ export default class Animal {
     if (this.age === 0 && this.stepsAlive >= this.constructor.maturesAt) this.age = 1;
     if (this.pregnancy) this.pregnancy.left -= 1;
     if (this.contestCooldown > 0) this.contestCooldown -= 1;
+
+    // Made by the hour rather than appearing in a lump at midnight, so a farm
+    // watched for half a day has half a day's milk in it. Nothing comes from
+    // the young, and an animal in poor condition gives less.
+    const rate = this.isAdult ? this.dailyProduce() : null;
+    if (rate) this.yielded += (rate.amount * this.health * clockStep()) / STEPS_PER_DAY;
+  }
+
+  /**
+   * Take what it has made; it starts filling again from nothing. Milk in the
+   * pail is milk off the cow.
+   * @returns {{ label: string, amount: number, unit: string } | null}
+   */
+  collect() {
+    const made = this.dailyProduce();
+    if (!made || this.yielded <= 0) return null;
+    const amount = this.yielded;
+    this.yielded = 0;
+    return { ...made, amount };
   }
 
   /**
