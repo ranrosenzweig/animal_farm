@@ -86,7 +86,6 @@ export default class Animal {
    */
   static swims = false;
 
-
   /** @type {Record<string, number>} How fast each drive climbs, per step. */
   static driveRates = {
     hunger: 0.004, thirst: 0.006, fatigue: 0.003, loneliness: 0.005, urge: 0.003,
