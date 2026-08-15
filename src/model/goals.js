@@ -61,6 +61,14 @@ export const GOALS = {
   graze: {
     relieves: "hunger",
     ...fromSource("grass"),
+    // Frozen ground, and snow lying on it. The grass is still there and the
+    // patch is as full as it ever was — what the cold takes is the mouthful,
+    // which is why a hard winter has the herd grazing far more of the day for
+    // the same relief. Nothing happens above freezing.
+    worth: (animal, { farm } = {}) => {
+      const tempC = farm?.clock?.tempC;
+      return tempC == null ? 1 : Math.min(1, Math.max(0.3, 1 + tempC / 8));
+    },
     narrate: (a) => `${a.name} crops at the grass.`,
   },
 

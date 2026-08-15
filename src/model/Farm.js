@@ -7,8 +7,8 @@ import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
 } from "./physics.js";
-import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
-import { OPENING, clockAt, clockStep } from "./clock.js";
+import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
+import { OPENING, clockAt, clockStep, productivity } from "./clock.js";
 
 /**
  * The farm itself: a named place that holds animals and can answer
@@ -125,7 +125,10 @@ export default class Farm {
    */
   pools() {
     return this.resources
-      .filter((r) => r.kind === "water" && !r.depleted)
+      // On the water itself, not on `depleted`: a held source is never
+      // depleted — it always has a drink in it — but a pond reading zero still
+      // shows a dry bed, and a dry bed is not something to walk around.
+      .filter((r) => r.kind === "water" && r.volume > 0)
       .map((r) => ({ x: r.x, y: r.y, radius: r.radius * DEEP }));
   }
 
@@ -651,6 +654,22 @@ export default class Farm {
   }
 
   /**
+   * The farmer's standing order, carried out: every source topped back up to
+   * the floor they set, however much the herd drank. Off at zero, which is how
+   * the farm runs unless somebody says otherwise — a trough that empties is
+   * meant to be a chore, and this is the setting that says it isn't.
+   * @private
+   */
+  keepStocked() {
+    const floor = stockFloor();
+    if (floor <= 0) return;
+    for (const resource of this.resources) {
+      const short = resource.capacity * floor - resource.volume;
+      if (short > 0) resource.refill(short);
+    }
+  }
+
+  /**
    * The farm as it stands after a round: the young are on the field, the dead
    * are off it, the drained sources are gone, and a quarter of an hour has
    * passed. Every round goes through here, so this is the only place the clock
@@ -659,6 +678,7 @@ export default class Farm {
    */
   settled(born = []) {
     this.water();
+    this.keepStocked();
     return new Farm(
       this.name,
       [...this.animals.filter((a) => a.isAlive()), ...born],
@@ -721,14 +741,20 @@ export default class Farm {
 
   /**
    * Everything the farm yields, summed across animals: `amount` is what it
-   * makes in a day, `waiting` is what is standing in the pails right now.
+   * makes in a day *at this time of year*, `waiting` is what is standing in
+   * the pails right now. The rate moves with the light, because that is what
+   * the animals are actually filling the pails at — a card that still read 27
+   * L a day through December would be quoting a summer figure.
    * @returns {{ label: string, amount: number, unit: string, waiting: number }[]}
    */
   dailyProduce() {
+    const season = productivity(this.clock);
     const totals = new Map();
     for (const animal of this.animals) {
       const yieldOf = animal.dailyProduce();
-      if (!yieldOf) continue;
+      // Only the grown: a calf fills no pail, and quoting its mother's figure
+      // for it made the daily rate promise more than the farm ever delivered.
+      if (!yieldOf || !animal.isAdult) continue;
       const running = totals.get(yieldOf.label);
       if (running) {
         running.amount += yieldOf.amount;
@@ -739,7 +765,7 @@ export default class Farm {
     }
     return [...totals.values()].map((t) => ({
       ...t,
-      amount: Math.round(t.amount * 10) / 10,
+      amount: Math.round(t.amount * season * 10) / 10,
       waiting: Math.round(t.waiting * 10) / 10,
     }));
   }

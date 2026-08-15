@@ -7,6 +7,33 @@ import { nextId } from "./random.js";
  * patch of grass it eats. Drawing from one lowers its volume, and nothing
  * refills it on its own — the farmer has to put more down.
  */
+
+/**
+ * The farmer's standing order: never let a source fall below this share of
+ * its capacity, whatever the animals take out of it. Zero is off, and off is
+ * how the farm has always run — sources drain, and refilling them is a chore.
+ */
+let floor = 0;
+
+export const stockFloor = () => floor;
+
+export const setStockFloor = (share) => { floor = Math.min(1, Math.max(0, share)); };
+
+/**
+ * Whether the levels are held exactly where they stand. Animals still drink
+ * and still graze — a held pond gives a full mouthful — and nothing raises a
+ * held source either: rain runs off it and topping it up does nothing. The
+ * reading simply stops moving in both directions, because a level that creeps
+ * up while it is meant to be frozen is no more frozen than one that drains.
+ *
+ * Not the same as a floor of 100%, which lets a source drain through the round
+ * and tops it back up at the end: this holds a half-empty pond half-empty.
+ */
+let held = false;
+
+export const heldLevels = () => held;
+
+export const setHeldLevels = (on) => { held = Boolean(on); };
 export const RESOURCE_KINDS = {
   water: {
     kind: "water",
@@ -73,7 +100,10 @@ export default class Resource {
   /** 0 when drained, 1 when brim-full. */
   get fullness() { return this.capacity === 0 ? 0 : this.volume / this.capacity; }
 
-  get depleted() { return this.volume <= 0; }
+  // Never while held: `Farm.nearestResource` skips a depleted source, so a
+  // held-at-empty pond would be invisible to the drink goal for good — the
+  // animals would have nowhere to go and would die of thirst beside it.
+  get depleted() { return !held && this.volume <= 0; }
 
   /**
    * How far it spreads. Area scales with what's left, so a drained pond is a
@@ -85,16 +115,24 @@ export default class Resource {
 
   /**
    * Take up to `amount`. A resource can only give what it has.
+   *
+   * Held sources are the exception: the animal gets its whole mouthful and the
+   * level does not move — whatever the level happens to say, including empty.
+   * What is held is the reading, not the supply, so a pond held low waters the
+   * herd exactly as well as a full one. Every drink and every mouthful in the
+   * model comes through here, so this one line is the whole of it.
    * @returns {number} how much was actually drawn — 0 when it's dry
    */
   draw(amount) {
+    if (held) return amount;
     const taken = Math.min(amount, this.volume);
     this.volume -= taken;
     return taken;
   }
 
-  /** Put more in, up to capacity. @returns {number} how much fit */
+  /** Put more in, up to capacity — nothing at all while held. @returns {number} how much fit */
   refill(amount) {
+    if (held) return 0;
     const added = Math.min(amount, this.capacity - this.volume);
     this.volume += added;
     return added;
