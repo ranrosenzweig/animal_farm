@@ -1,4 +1,4 @@
-import { nextId, pick, randomAngle, randomInt } from "./random.js";
+import { nextId, pick, random, randomAngle, randomInt } from "./random.js";
 import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js";
 import { DRIVES, clamp01, startingDrives } from "./drives.js";
 import { GOALS, atGoal, companyFor } from "./goals.js";
@@ -162,7 +162,7 @@ export default class Animal {
 
     this.sex = pick(["male", "female"]);
     /** What this one, rather than its kind, brings to a contest. */
-    this.vigour = 0.85 + Math.random() * 0.3;
+    this.vigour = 0.85 + random() * 0.3;
     /** Steps left before it will square up to anyone again. */
     this.contestCooldown = 0;
     this.drives = startingDrives();
@@ -636,7 +636,7 @@ export default class Animal {
   roamHeading() { return this.amble(); }
 
   /** Carry on roughly forward. @protected */
-  amble() { return this.facing + (Math.random() - 0.5) * 0.6; }
+  amble() { return this.facing + (random() - 0.5) * 0.6; }
 
   /* ---------------------------------------------------------------- */
   /* Body: turning and stepping                                        */

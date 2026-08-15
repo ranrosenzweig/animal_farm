@@ -18,6 +18,7 @@
 // neither survives momentum: a chicken struck by a horse goes where the horse
 // sent it, and a body running downhill outpaces its own legs. What replaces
 // them is the speed cap, which is the physical version of the same worry.
+import { seed } from "../src/model/random.js";
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
 import { PASTURE, inBounds } from "../src/model/pasture.js";
@@ -26,6 +27,15 @@ import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
 import Resource from "../src/model/Resource.js";
+
+// A different farm every run, but never an unrepeatable one. The check earns
+// its keep by exploring trajectories a fixed seed would never reach — it has
+// caught overlaps that only appear in one crowd out of six — and a failure
+// nobody can reproduce is a failure nobody fixes. So: draw a seed, say which,
+// and take it back from SEED= to replay that exact run.
+const SEED = Number(process.env.SEED ?? Date.now() % 2 ** 31);
+seed(SEED);
+console.log(`Seed ${SEED} — rerun this exact farm with SEED=${SEED} npm run check`);
 
 // Deliberately more animals than the field can hold, so the check exercises
 // both halves of the placement rule: the ones that fit, and the ones turned away.
@@ -259,7 +269,7 @@ if (calved === 0) {
 }
 
 if (failures > 0) {
-  console.error(`\n${failures} violation(s).`);
+  console.error(`\n${failures} violation(s). Reproduce with: SEED=${SEED} npm run check`);
   process.exit(1);
 }
 console.log(
