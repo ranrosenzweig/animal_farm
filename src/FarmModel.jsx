@@ -16,6 +16,23 @@ import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
 import "./farm.css";
 
+/**
+ * How far up each glyph its own legs reach, in em of the sprite's type.
+ *
+ * Emoji animals come with legs already drawn, so a second set painted under
+ * them is legs on top of legs however it is placed — that is not a positioning
+ * problem, it is one pair too many. So the glyph is cut off at this line and
+ * the walking legs are drawn in the gap: what moves is the animal's own legs,
+ * in the place its own legs were.
+ *
+ * Calibrated by eye against the system emoji font, which is the only place
+ * these glyphs exist. Another font draws them differently and these would want
+ * re-checking — which is what a per-species number is for.
+ */
+const LEG_LINE = {
+  Cow: 0.3, Horse: 0.3, Sheep: 0.24, Pig: 0.22, Chicken: 0.28, Duck: 0.2,
+};
+
 /** How each goal reads on screen. Presentation only — the model has no icons. */
 const GOAL_ICONS = {
   graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️",
@@ -1040,6 +1057,7 @@ export default function FarmModel() {
                 // or through mud swings them slower, because it is the same
                 // legs covering less ground.
                 "--stride": `${Math.round(Math.min(1400, (stepMs * 1.6 * a.stepSize) / Math.max(a.speed, 0.2)))}ms`,
+                "--legline": `${LEG_LINE[a.species] ?? 0.24}em`,
               }}
               onClick={(event) => {
                 // While placing, let the click through to the pasture beneath.
@@ -1061,7 +1079,7 @@ export default function FarmModel() {
                 <span className="legs" aria-hidden="true">
                   {Array.from({ length: a.legs }, (_, i) => <i key={i} />)}
                 </span>
-                {a.emoji}
+                <span className="glyph">{a.emoji}</span>
                 {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
               {showTags && (

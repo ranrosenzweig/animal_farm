@@ -3,7 +3,7 @@ import { randomInt } from "../random.js";
 
 export default class Pig extends Animal {
   static species = "Pig";
-  static emoji = "🐷";
+  static emoji = "🐖";   // the whole pig, not the head — it has legs to walk on
   static color = "#D08B93";
   static diet = ["slops", "acorns", "sweet potatoes"];
   static breeds = ["Yorkshire", "Duroc", "Hampshire", "Berkshire"];
