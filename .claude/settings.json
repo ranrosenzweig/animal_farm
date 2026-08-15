@@ -10,6 +10,8 @@
       "Bash(git push --force *)",
       "Bash(rm -rf / *)"
     ]
+  },
+  "enabledPlugins": {
+    "ponytail@ponytail": true
   }
 }
-

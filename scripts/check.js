@@ -22,7 +22,7 @@ import { seed } from "../src/model/random.js";
 import Farm from "../src/model/Farm.js";
 import { SPECIES } from "../src/model/species.js";
 import { PASTURE, inBounds } from "../src/model/pasture.js";
-import { ROCKS, STEEPEST, rockPenetration } from "../src/model/terrain.js";
+import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.js";
 import { CONTACT_SLOP, GRAVITY, STOPPED } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
@@ -42,6 +42,14 @@ console.log(`Seed ${SEED} — rerun this exact farm with SEED=${SEED} npm run ch
 const HERD = 90;
 const ROUNDS = 200;
 const EPSILON = 1e-9;
+
+// How far a pool may close over a body standing on its rim before that counts
+// as the body being in the water. Not the usual `CONTACT_SLOP`, because a pool
+// breathes: a herd drinks it down, rain and the top-up below swell it again,
+// and water that rises around planted feet catches them for the one round it
+// takes the solver to put them back on the bank. A unit is the rim. Walking
+// across a pond would show up here as several.
+const RISE = 1;
 
 // Well watered and well grassed, and topped back up every round below. This
 // half of the check is about movement under crowding, so nothing here should
@@ -63,19 +71,32 @@ let failures = 0;
 const fail = (msg) => { console.error(`  FAIL ${msg}`); failures++; };
 
 const audit = (when) => {
+  const pools = farm.pools();
   for (const [a, b] of farm.overlaps()) {
     fail(`${when}: ${a.name} the ${a.species} overlaps ${b.name} the ${b.species}`);
   }
   for (const a of farm.animals) {
     if (!inBounds(a)) fail(`${when}: ${a.name} is outside the fence at (${a.x}, ${a.y})`);
-    // Leaning on a rock is fine; being inside one is not. Same hair's breadth
-    // the solver settles for, so resting against stone doesn't read as a fault.
-    const inRock = rockPenetration(a, a.radius);
-    if (inRock > CONTACT_SLOP) {
-      fail(`${when}: ${a.name} is ${inRock.toFixed(2)} inside a rock at (${a.x.toFixed(1)}, ${a.y.toFixed(1)})`);
+    // Leaning on a rock or a wall is fine; being inside one is not. Same hair's
+    // breadth the solver settles for, so resting against stone doesn't read as
+    // a fault.
+    const inSolid = obstaclePenetration(a, a.radius);
+    if (inSolid > CONTACT_SLOP) {
+      fail(`${when}: ${a.name} is ${inSolid.toFixed(2)} inside solid ground at (${a.x.toFixed(1)}, ${a.y.toFixed(1)})`);
     }
     if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) {
       fail(`${when}: ${a.name} is at (${a.x}, ${a.y}) — the physics has come apart`);
+    }
+    // Water is a body too, for everything that cannot swim. Wading to the rim
+    // to drink is the point; standing out of its depth is not.
+    for (const pool of a.constructor.swims ? [] : pools) {
+      // Water stops feet, so this is the animal's middle against the line where
+      // the pond gets too deep — not its whole body, which is wading.
+      const under = pool.radius - Math.hypot(a.x - pool.x, a.y - pool.y);
+      if (under > RISE) {
+        fail(`${when}: ${a.name} the ${a.species} is ${under.toFixed(2)} into deep water ` +
+          `at (${a.x.toFixed(1)}, ${a.y.toFixed(1)})`);
+      }
     }
     if (!Number.isFinite(a.speed)) fail(`${when}: ${a.name} is travelling at ${a.speed}`);
     // Nothing may outrun its own top speed. A collision that handed out more
@@ -164,29 +185,32 @@ console.log(`Most any body was carried past its own cruising speed in one step: 
   }
 }
 
-// No rock may stand so near the fence that the biggest animal cannot fit
-// between the two. The pocket in between would have no legal ground in it, and
-// anything that wandered in would be shoved off the rail and out of the stone
-// turn about until the solver gave up — taking every overlap near it down with
-// it. Cheap to check, and invisible until something large walks into the gap.
+// The gap between a solid patch and the fence must be wide enough for the
+// biggest animal, or not exist at all. A pocket narrower than an animal has no
+// legal ground in it, and anything that wandered in would be shoved off the
+// rail and out of the stone turn about until the solver gave up — taking every
+// overlap near it down with it. A wall standing *across* the rail is fine:
+// there is nothing behind it to be trapped in, which is how the barn gets to
+// sit in the corner. Cheap to check, and invisible until something large walks
+// into the gap.
 {
   const widest = SPECIES.reduce((w, S) => Math.max(w, S.radius), 0);
-  for (const rock of ROCKS) {
-    const room = rock.radius + widest;
-    const tight = [
-      ["the west fence", rock.x - room - PASTURE.minX],
-      ["the east fence", PASTURE.maxX - room - rock.x],
-      ["the north fence", rock.y - room - PASTURE.minY],
-      ["the south fence", PASTURE.maxY - room - rock.y],
-    ].filter(([, slack]) => slack < 0);
-    for (const [which, slack] of tight) {
-      fail(`terrain: the rock at (${rock.x}, ${rock.y}) leaves no room against ${which} — ` +
-        `a ${widest}-radius animal is ${(-slack).toFixed(1)} short of fitting through`);
+  for (const solid of OBSTACLES) {
+    // How much walkable ground each side leaves between the patch and the rail.
+    const gaps = [
+      ["the west fence", solid.x - solid.radius - PASTURE.minX],
+      ["the east fence", PASTURE.maxX - solid.x - solid.radius],
+      ["the north fence", solid.y - solid.radius - PASTURE.minY],
+      ["the south fence", PASTURE.maxY - solid.y - solid.radius],
+    ];
+    for (const [which, gap] of gaps.filter(([, g]) => g > 0 && g < widest)) {
+      fail(`terrain: the ${solid.ground} at (${solid.x}, ${solid.y}) leaves a ${gap.toFixed(1)}-wide ` +
+        `pocket against ${which} — too narrow for a ${widest}-radius animal to stand in`);
     }
   }
   if (failures === 0) {
-    console.log(`Rocks: all ${ROCKS.length} stand clear enough of the fence for the widest ` +
-      `animal (radius ${widest}) to pass between.`);
+    console.log(`Obstacles: all ${OBSTACLES.length} either stand clear of the fence for the widest ` +
+      `animal (radius ${widest}) or reach across it.`);
   }
 }
 

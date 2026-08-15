@@ -12,6 +12,7 @@ export default class Duck extends Animal {
   static mass = 3;         // light enough to be knocked clean across the field
   static radius = 4.5;
   static turnRate = 0.45;  // waddles round quickly enough
+  static swims = true;     // the one thing here that crosses a pond rather than skirting it
 
   // Never far from water, and thirsty long before it is hungry.
   static affinities = { drink: 1.0, graze: 0.6, flock: 0.5, rest: 0.4, wallow: 0, roam: 0.5, mate: 0.6 };

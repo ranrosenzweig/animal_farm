@@ -2,12 +2,13 @@ import { SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomAngle, randomInt } from "./random.js";
 import { GOALS } from "./goals.js";
-import { ROCKS, standable } from "./terrain.js";
+import { OBSTACLES, standable } from "./terrain.js";
 import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
 } from "./physics.js";
-import Resource, { RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
+import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES } from "./Resource.js";
+import { OPENING, clockAt, clockStep } from "./clock.js";
 
 /**
  * The farm itself: a named place that holds animals and can answer
@@ -27,12 +28,18 @@ export default class Farm {
    * @param {string} name
    * @param {import("./Animal.js").default[]} animals
    * @param {Resource[]} resources  water and grass, which run out
+   * @param {number} steps  quarter-hours since the year began; a farm opens on
+   *   a spring morning rather than at midnight in January
    */
-  constructor(name = "The Farm", animals = [], resources = []) {
+  constructor(name = "The Farm", animals = [], resources = [], steps = OPENING) {
     this.name = name;
     this.animals = animals;
     this.resources = resources;
+    this.steps = steps;
   }
+
+  /** The hour, the day and the season. Everything about time comes from here. */
+  get clock() { return clockAt(this.steps); }
 
   /** A farm stocked with one of every species, a pond and two patches of grass. */
   static starter(name = "The Farm") {
@@ -59,12 +66,15 @@ export default class Farm {
     const spot = this.freeSpotFor(animal);
     if (!spot) return { farm: this, added: false };
     animal.moveTo(spot);
-    return { farm: new Farm(this.name, [...this.animals, animal], this.resources), added: true };
+    return {
+      farm: new Farm(this.name, [...this.animals, animal], this.resources, this.steps),
+      added: true,
+    };
   }
 
   /** @returns {Farm} a new farm without the animal carrying `id`. */
   remove(id) {
-    return new Farm(this.name, this.animals.filter((a) => a.id !== id), this.resources);
+    return new Farm(this.name, this.animals.filter((a) => a.id !== id), this.resources, this.steps);
   }
 
   find(id) {
@@ -94,8 +104,24 @@ export default class Farm {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Put down water or grass. Animals aren't blocked by it and can stand in
-   * it — a trough is somewhere to be, not something to walk around.
+   * The middles of the pools, as circles: water too deep to stand up in, and
+   * so a body to everything that cannot swim. Grass is not here — a patch of
+   * grass is somewhere to be, not something to walk around.
+   *
+   * Worked out fresh each time because a pool shrinks as it is drunk: the
+   * water that barred a cow this morning is a puddle she can cross by dusk.
+   * @returns {{x: number, y: number, radius: number}[]}
+   */
+  pools() {
+    return this.resources
+      .filter((r) => r.kind === "water" && !r.depleted)
+      .map((r) => ({ x: r.x, y: r.y, radius: r.radius * DEEP }));
+  }
+
+  /**
+   * Put down water or grass. Grass is somewhere to be rather than something to
+   * walk around; water is both — animals drink from its rim and only ducks
+   * cross it.
    * @param {"water"|"grass"} kind
    * @param {{x: number, y: number}} at  clamped inside the fence
    * @returns {{ farm: Farm, resource: Resource }}
@@ -103,7 +129,7 @@ export default class Farm {
   addResource(kind, at, options) {
     const resource = new Resource(kind, clampToPasture(at), options);
     return {
-      farm: new Farm(this.name, this.animals, [...this.resources, resource]),
+      farm: new Farm(this.name, this.animals, [...this.resources, resource], this.steps),
       resource,
     };
   }
@@ -128,7 +154,7 @@ export default class Farm {
         filled += 1;
       }
     }
-    return { farm: new Farm(this.name, this.animals, this.resources), added, filled };
+    return { farm: new Farm(this.name, this.animals, this.resources, this.steps), added, filled };
   }
 
   /**
@@ -279,8 +305,11 @@ export default class Farm {
       const baby = mother.newborn();
       // Beside its mother if there is room there, and only failing that
       // wherever the field has a gap.
+      // The field the spot is judged against is the one from the start of the
+      // round, so a second birth in the same round has to be checked against
+      // the first by hand — otherwise twins arrive standing in each other.
       const spot = this.freeSpotNear(mother, baby) ?? this.freeSpotFor(baby);
-      if (!spot) continue; // no room in the field; the birth waits
+      if (!spot || born.some((other) => baby.wouldCrowd(spot, other))) continue;
       baby.name = this.unusedName(baby.name);
       baby.moveTo(spot);
       // The two of them know each other from the first step, without having
@@ -326,12 +355,38 @@ export default class Farm {
 
   /**
    * May `mover` stand at `point`? Only if it is inside the fence, clear of the
-   * rocks, and no other animal's personal space reaches it.
+   * rocks, out of its depth in nothing, and no other animal's personal space
+   * reaches it.
    */
   isClear(point, mover) {
     return inBounds(point)
       && standable(point, mover.radius)
+      && this.barriersFor(mover).every((b) => distance(point, b) >= b.radius + mover.radius)
       && this.blockerAt(point, mover) === null;
+  }
+
+  /**
+   * The circles `mover` cannot walk into: the rocks, and — unless it swims —
+   * the deep water. Both are the same thing to the physics, which is why
+   * making a pond solid took no new law: it is a rock that can be drunk.
+   *
+   * A rock stops a body; water stops *feet*. So a pool is handed over shrunk
+   * by the mover's own radius, which is exactly what it takes for the solver
+   * — which works in whole bodies — to leave every animal standing with its
+   * middle on the line where the water gets too deep, large and small alike.
+   * That is the difference between an animal at the water's edge and one
+   * standing a body's width off it looking at the water, and it is what makes
+   * reaching a pond mean drinking from it.
+   */
+  barriersFor(mover, pools = this.pools()) {
+    if (mover.constructor.swims) return OBSTACLES;
+    return [
+      ...OBSTACLES,
+      ...pools
+        .map((pool) => ({ ...pool, radius: pool.radius - mover.radius }))
+        // A puddle narrower than the animal wading in it stops nobody.
+        .filter((pool) => pool.radius > 0),
+    ];
   }
 
   /**
@@ -426,8 +481,15 @@ export default class Farm {
         collide(this.animals[i], this.animals[j]);
       }
     }
+    // One list for the whole round: the pools do not move or shrink mid-step,
+    // and rebuilding them per animal per pass would be the most expensive thing
+    // on the farm.
+    const pools = this.pools();
+    const each = new Map(this.animals.map((a) => [a, this.barriersFor(a, pools)]));
+    const barriers = (animal) => each.get(animal);
+
     for (const animal of this.animals) {
-      for (const rock of ROCKS) collideStatic(animal, rock);
+      for (const rock of barriers(animal)) collideStatic(animal, rock);
       containWithin(animal);
       // Every impulse of this round has now landed on it, so this is where the
       // speed limit belongs — after the shoving, not only after the striding.
@@ -444,7 +506,7 @@ export default class Farm {
       // The ground has the last word: whatever the bodies did to each other,
       // nobody ends up inside a rock or outside the fence.
       for (const animal of this.animals) {
-        for (const rock of ROCKS) deepest = Math.max(deepest, separateStatic(animal, rock));
+        for (const rock of barriers(animal)) deepest = Math.max(deepest, separateStatic(animal, rock));
         deepest = Math.max(deepest, confine(animal));
       }
       // One test for all three, and it is "did anything have to move much?".
@@ -560,15 +622,37 @@ export default class Farm {
   }
 
   /**
+   * What the weather puts back. Rain fills the troughs and brings the grass
+   * on; snow only melts into the water. It is a trickle beside what a herd
+   * takes out — a wet week eases the chores, it does not do them.
+   * @returns {number} how much went in, over every source
+   * @private
+   */
+  water() {
+    const { sky, precipitation } = this.clock;
+    if (sky === "clear") return 0;
+    let added = 0;
+    for (const resource of this.resources) {
+      if (resource.kind === "grass" && sky !== "rain") continue;
+      added += resource.refill(precipitation * (resource.kind === "water" ? 0.8 : 0.25));
+    }
+    return added;
+  }
+
+  /**
    * The farm as it stands after a round: the young are on the field, the dead
-   * are off it, and the drained sources are gone.
+   * are off it, the drained sources are gone, and a quarter of an hour has
+   * passed. Every round goes through here, so this is the only place the clock
+   * advances — and the only place the weather gets to fall on the field.
    * @private
    */
   settled(born = []) {
+    this.water();
     return new Farm(
       this.name,
       [...this.animals.filter((a) => a.isAlive()), ...born],
       this.resources.filter((r) => !r.depleted),
+      this.steps + clockStep(),
     );
   }
 

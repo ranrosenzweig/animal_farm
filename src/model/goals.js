@@ -1,4 +1,5 @@
 import { MUD, centroid, distance } from "./pasture.js";
+import { groundAt } from "./terrain.js";
 
 /**
  * Builds the place/satisfied pair for a goal served by a resource that runs
@@ -11,10 +12,15 @@ function fromSource(kind) {
   return {
     consumes: kind,
     place: (animal, { farm } = {}) => farm?.nearestResource(animal, kind) ?? null,
-    // Close enough to reach into it — a big pond can be drunk from its edge.
+    // Standing in it, not beside it. The test is on the animal's own middle
+    // rather than on the reach of its body, because a body here is three times
+    // the animal you see and "within a body's width" is a stride away with its
+    // head up. An animal drinks when it has its feet in the water — which it
+    // can always get to, since deep water holds it at the rim and the rim is
+    // inside the pond.
     satisfied: (animal, context = {}) => {
       const source = context.farm?.nearestResource(animal, kind);
-      return source != null && distance(animal, source) < animal.radius + source.radius;
+      return source != null && distance(animal, source) < source.radius;
     },
   };
 }
@@ -67,6 +73,11 @@ export const GOALS = {
   wallow: {
     relieves: "fatigue",
     place: () => MUD,
+    // Standing in the mud, which the ground itself can answer — no need to
+    // guess at how wide the patch is from over here. Without this it falls
+    // through to the general "near enough" test, and a big animal wallows
+    // from two lengths outside the mud it never touched.
+    satisfied: (animal) => groundAt(animal).kind === "mud",
     narrate: (a) => `${a.name} settles into the cool mud.`,
   },
 

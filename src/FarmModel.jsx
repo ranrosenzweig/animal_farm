@@ -5,6 +5,7 @@ import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { DRIVES, DRIVE_LABELS } from "./model/drives.js";
 import { RESOURCE_KINDS } from "./model/Resource.js";
+import { hhmm, roundsPerDay, setRoundsPerDay } from "./model/clock.js";
 import ScriptedMind from "./model/minds/ScriptedMind.js";
 import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
@@ -15,6 +16,10 @@ const GOAL_ICONS = {
 };
 
 const SEX_MARKS = { female: "♀", male: "♂" };
+
+/** How the hour and the weather read on screen. Presentation only. */
+const PHASE_MARKS = { dawn: "🌅", day: "🌞", dusk: "🌇", night: "🌙" };
+const SKY_MARKS = { rain: "🌧", snow: "❄️", clear: "☀️" };
 
 const RESOURCE_ICONS = { water: "💧", grass: "🌿" };
 
@@ -70,6 +75,22 @@ function standing(spot) {
 }
 
 /** The trapezoid the ground fills, in the ground layer's own box. */
+/**
+ * Where the sun — or, once it is down, the moon — hangs in the strip of sky
+ * above the horizon. It walks left to right across the hours it is up, and
+ * rides highest halfway through them, so a short winter day is a low arc and
+ * a long summer one climbs.
+ */
+function skyBody({ hour, sunrise, sunset, daylength, daylight }) {
+  const through = daylight
+    ? (hour - sunrise) / daylength
+    : ((hour - sunset + 24) % 24) / (24 - daylength);
+  return {
+    left: `${8 + through * 84}%`,
+    top: `${HORIZON - Math.sin(Math.PI * through) * (HORIZON - 1)}%`,
+  };
+}
+
 const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
   `${project({ x: 100, y: HORIZON }).x}% 0, 100% 100%, 0 100%)`;
 
@@ -79,6 +100,13 @@ const GROUND_CLIP = `polygon(${project({ x: 0, y: HORIZON }).x}% 0, ` +
  * renders, so neither should they.
  */
 const TREE_SPOTS = [[-0.45, -0.2], [0.4, -0.42], [0.02, 0.34], [-0.15, -0.62]];
+
+/**
+ * Where the barn stands — read off the terrain rather than placed by eye, so
+ * the building on screen is the one the animals bump into. Unlike the trees,
+ * which are scenery over walkable woodland, this one is a wall.
+ */
+const BARN = PATCHES.find((patch) => patch.ground === "barn");
 
 const TREES = PATCHES.filter((patch) => patch.ground === "wood").flatMap((patch, w) =>
   TREE_SPOTS.map(([dx, dy], t) => ({
@@ -230,6 +258,8 @@ export default function FarmModel() {
 
   /* Settings. Every one of these is a live knob: nothing here is read once. */
   const [stepMs, setStepMs] = useState(STEP_MS);
+  /** How many rounds a day takes. Lives in the clock; held here to render it. */
+  const [dayRounds, setDayRounds] = useState(roundsPerDay);
   const [mindKind, setMindKind] = useState("scripted");
   const [cadence, setCadence] = useState(ScriptedMind.cadence);
   const [showTags, setShowTags] = useState(true);
@@ -243,6 +273,10 @@ export default function FarmModel() {
   const produce = farm.dailyProduce();
   const activity = farm.activity();
   const stock = farm.stock();
+  const clock = farm.clock;
+  /** How much night to wash over the field, and how much horizon glow. */
+  const nightfall = Math.min(0.72, Math.max(0, (0.12 - clock.sun) * 1.4));
+  const afterglow = Math.max(0, 1 - Math.abs(clock.sun) / 0.25) * 0.55;
   /** Sources far enough down to be worth mentioning, and which kinds they are. */
   const lowSources = farm.resources.filter((r) => !r.depleted && r.fullness < lowAt);
   const lowKinds = new Set(lowSources.map((r) => r.kind));
@@ -653,6 +687,60 @@ export default function FarmModel() {
           background: linear-gradient(180deg, var(--sky) 0%, var(--sky-2) 100%);
           border: 3px solid var(--wood-dark);
         }
+        /* The sun itself, small and high. Drawn in the sky strip above the
+           horizon, so it is behind everything standing on the ground. */
+        .fa-sun {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          font-size: 20px;
+          pointer-events: none;
+          filter: drop-shadow(0 0 10px rgba(255,214,140,0.9));
+          transition: left 700ms linear, top 700ms linear;
+        }
+        /* What is coming down. Both are one tiled layer scrolling past: rain
+           as slanted threads, snow as two sizes of fleck drifting at their own
+           speeds. Calm mode stops them with everything else. */
+        .fa-weather {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+        .fa-weather.rain {
+          background-image: repeating-linear-gradient(
+            105deg, rgba(214,232,255,0.75) 0 1px, transparent 1px 9px);
+          animation: fa-rain 420ms linear infinite;
+        }
+        @keyframes fa-rain { to { background-position: -34px 132px; } }
+        .fa-weather.snow {
+          background-image:
+            radial-gradient(2.2px 2.2px at 22% 24%, #fff 55%, transparent 57%),
+            radial-gradient(1.6px 1.6px at 68% 61%, rgba(255,255,255,0.85) 55%, transparent 57%);
+          background-size: 110px 110px, 76px 76px;
+          animation: fa-snow 5.5s linear infinite;
+        }
+        @keyframes fa-snow { to { background-position: 18px 110px, -22px 76px; } }
+        .farm-app.calm .fa-weather, .farm-app.calm .fa-sun { animation: none; transition: none; }
+
+        /* Night over the whole field, and the low warm band the sun leaves on
+           the horizon as it comes up or goes down. Multiply rather than a
+           plain veil, so the greens go deep instead of grey. */
+        .fa-night, .fa-glow {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          transition: opacity 700ms linear;
+        }
+        .fa-night {
+          background: linear-gradient(180deg, #0a1430 0%, #12203c 55%, #16223a 100%);
+          mix-blend-mode: multiply;
+        }
+        /* Plain alpha, not a blend: screening an orange over a green field
+           bleaches it grey, where laying it on top warms it. */
+        .fa-glow {
+          background: radial-gradient(
+            46% 34% at var(--sun-x, 50%) ${HORIZON}%,
+            rgba(255,158,58,0.9) 0%, rgba(226,92,48,0.34) 42%, transparent 70%);
+        }
         /* Low hills, so the field ends against something instead of stopping. */
         .fa-hills {
           position: absolute;
@@ -701,6 +789,14 @@ export default function FarmModel() {
         .fa-ground-rock {
           background: radial-gradient(ellipse at 42% 30%, #bcbbb4 0%, #8b8b86 45%, #4a4a47 100%);
           box-shadow: 0 3px 5px rgba(0,0,0,0.4), inset 0 -2px 4px rgba(0,0,0,0.35);
+        }
+        /* The yard the barn stands on, drawn at exactly the radius animals
+           bounce off — the building is a wall, not scenery, and the footprint
+           is what says so. Bare earth: nothing grows where the herd mills. */
+        .fa-ground-barn {
+          background: radial-gradient(ellipse at 50% 45%, #a08a63 0%, #7d6a48 65%, #5e4f36 100%);
+          box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);
+          opacity: 0.75;
         }
         /* Trees stand on the woodland patches. Woodland only slows an animal,
            so they are scenery over real ground rather than obstacles. */
@@ -1389,6 +1485,20 @@ export default function FarmModel() {
                 The stock stands down once the drawer is open, rather than say
                 the same thing twice a line apart. */}
             <span className="fa-glance">
+              {/* The farm's own clock. Not aria-live: it changes every step,
+                  and a reader has no use for being told the time four times a
+                  minute. */}
+              <span className="item" title={`Sun up ${hhmm(clock.sunrise)}, down ${hhmm(clock.sunset)}`}>
+                {PHASE_MARKS[clock.phase]} {clock.time} · day {clock.day}
+              </span>
+              <span
+                className="item"
+                title={clock.sky === "clear"
+                  ? "Nothing falling"
+                  : `${clock.sky} — ${Math.round(clock.precipitation * 100)}% of a downpour`}
+              >
+                {SKY_MARKS[clock.sky]} {clock.season} {Math.round(clock.tempC)}°C
+              </span>
               <span className="item">{farm.size} head</span>
               {!chores && stock.map((s) => (
                 <span
@@ -1543,11 +1653,18 @@ export default function FarmModel() {
             : undefined}
         >
           <div className="fa-hills" aria-hidden="true" />
+          {/* The sun climbs from where it rose to where it will set, and the
+              moon takes the same road once it is down. Both ride in the strip
+              of sky above the horizon, so noon is high and dusk is on the
+              rail. */}
+          <div className="fa-sun" style={skyBody(clock)} aria-hidden="true">
+            {clock.daylight ? "☀️" : "🌙"}
+          </div>
           <div className="fa-ground" aria-hidden="true" />
           {/* The mud is no longer a landmark laid on the field — it is one of
               the terrain's patches now, and gets drawn with the rest of them. */}
           <PastureTerrain />
-          <div className="fa-barn" style={standing({ x: 84, y: 18 })}>🏚️</div>
+          <div className="fa-barn" style={standing(BARN)}>🏚️</div>
           {TREES.map((tree) => (
             <div key={tree.key} className="fa-tree" style={standing(tree)} aria-hidden="true">🌳</div>
           ))}
@@ -1610,6 +1727,23 @@ export default function FarmModel() {
             <div className="fa-empty">The pasture is empty. Press + on a pen at the top to add one.</div>
           )}
           <div className="fa-fence" />
+          {/* The light, laid over everything including the animals — a field at
+              dusk is dim all the way to the fence. Both are driven by the sun's
+              elevation out of the model, so the glow really is on the side the
+              sun is, and midsummer stays light hours longer than midwinter. */}
+          {clock.sky !== "clear" && (
+            <div
+              className={`fa-weather ${clock.sky}`}
+              style={{ opacity: 0.3 + clock.precipitation * 0.55 }}
+              aria-hidden="true"
+            />
+          )}
+          <div className="fa-night" style={{ opacity: nightfall }} aria-hidden="true" />
+          <div
+            className="fa-glow"
+            style={{ opacity: afterglow, "--sun-x": clock.hour < 12 ? "20%" : "80%" }}
+            aria-hidden="true"
+          />
         </div>
 
         {selected && (
@@ -1739,6 +1873,34 @@ export default function FarmModel() {
               onChange={(e) => setStepMs(Number(e.target.value))}
             />
             <span className="v">{stepMs} ms</span>
+          </div>
+
+          {/* Two different clocks: the step length is how fast the farm runs,
+              this is how much of a day each step is worth. The readout gives
+              both, since what a farmer wants to know is how long a day lasts
+              in front of them. */}
+          <div className="fa-set-row">
+            <span className="l" id="set-day">A day takes</span>
+            <input
+              type="range"
+              min={24}
+              max={384}
+              step={8}
+              value={dayRounds}
+              aria-labelledby="set-day"
+              aria-valuetext={`${dayRounds} steps, about ${Math.round((dayRounds * stepMs) / 1000)} seconds`}
+              onChange={(e) => {
+                const rounds = Number(e.target.value);
+                setRoundsPerDay(rounds);
+                setDayRounds(rounds);
+              }}
+            />
+            {/* Seconds, not steps: how long a day lasts in front of the farmer
+                is what the knob is for, and it moves with the step length too.
+                The step count is in the label for anyone who wants it. */}
+            <span className="v" title={`${dayRounds} steps to a day`}>
+              {Math.round((dayRounds * stepMs) / 1000)}s
+            </span>
           </div>
 
           <div className="fa-set-row">

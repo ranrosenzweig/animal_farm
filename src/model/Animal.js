@@ -6,6 +6,7 @@ import { RESOURCE_NAMES } from "./Resource.js";
 import { groundAt, slopeAt } from "./terrain.js";
 import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
+import { awake, metabolism, urgency } from "./clock.js";
 
 /**
  * Abstract base for every animal on the farm.
@@ -70,6 +71,20 @@ export default class Animal {
   static affinities = {
     graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4, mate: 0.7,
   };
+
+  /**
+   * @type {boolean} Whether this kind keeps to the dark. Nearly nothing on a
+   * farm does, so the default is to be up with the sun — but it is a plain
+   * static, so a species that leaves it out simply inherits the daylight.
+   */
+  static nocturnal = false;
+
+  /**
+   * @type {boolean} Whether deep water is ground to this kind. Almost nothing
+   * on a farm can cross a pond, so the default is to be stopped by one exactly
+   * as by a rock — a cow walks round the water it drinks from.
+   */
+  static swims = false;
 
   /** @type {Record<string, number>} How fast each drive climbs, per step. */
   static driveRates = {
@@ -294,7 +309,19 @@ export default class Animal {
    * @returns {import("./minds/Mind.js").Percept}
    */
   perceive({ neighbors = [], farm } = {}) {
+    const clock = farm?.clock;
     return {
+      // The hour of the day and the time of year, as any animal can tell them:
+      // how high the sun is, whether it is up, and what the season is doing.
+      time: clock && {
+        hour: clock.time,
+        phase: clock.phase,
+        daylight: clock.daylight,
+        season: clock.season,
+        sky: clock.sky,
+        tempC: Math.round(clock.tempC),
+        awake: awake(clock, this.constructor.nocturnal),
+      },
       self: {
         name: this.name,
         species: this.species,
@@ -344,8 +371,13 @@ export default class Animal {
    */
   pressureFor(goalName, context = {}) {
     const goal = GOALS[goalName];
-    if (!goal?.relieves) return this.constructor.baselinePressure;
-    const pressure = this.drives[goal.relieves];
+    // The hour has the last word on every want: an animal in its own night
+    // wants to sleep, and wants everything else a good deal less.
+    const atThisHour = (pressure) =>
+      urgency(pressure, goal?.relieves, context.farm?.clock, this.constructor.nocturnal);
+
+    if (!goal?.relieves) return atThisHour(this.constructor.baselinePressure);
+    const pressure = atThisHour(this.drives[goal.relieves]);
     if (goal.anywhere || goal.place(this, context) != null) return pressure;
     return pressure * this.constructor.unreachable;
   }
@@ -369,8 +401,13 @@ export default class Animal {
   /** Drives climb; the one being served falls only if there was anything to take. */
   feel(context = {}) {
     const rates = this.constructor.driveRates;
+    const clock = context.farm?.clock;
     for (const drive of DRIVES) {
-      this.drives[drive] = clamp01(this.drives[drive] + (rates[drive] ?? 0));
+      // A drive climbs at its own pace, but the season and the hour set how
+      // fast that pace runs: cold makes it hungry, a dry summer makes it
+      // thirsty, and everything slows while it sleeps.
+      const pace = metabolism(drive, clock, this.constructor.nocturnal);
+      this.drives[drive] = clamp01(this.drives[drive] + (rates[drive] ?? 0) * pace);
     }
 
     const relief = this.constructor.relief;
@@ -625,7 +662,63 @@ export default class Animal {
   heading(context = {}) {
     if (this.isStill()) return this.facing;
     const place = this.goalPlace(context);
-    return place ? this.headingToward(place) : this.roamHeading(context);
+    const wanted = place ? this.headingToward(place) : this.roamHeading(context);
+    return this.skirt(wanted, place, context);
+  }
+
+  /**
+   * Bend a heading around the first rock or pond standing in it.
+   *
+   * An animal that only discovers an obstacle by walking into it is an animal
+   * that spends its life shuffling along a shore — `balk` peels it off a
+   * fraction of a turn at a time, which is the right answer once it is already
+   * stuck and a poor one for a cow that can plainly see the water. So it looks
+   * a couple of turning circles down its own line, and if something solid sits
+   * in that corridor it aims at the tangent instead: the outermost line that
+   * still clears the thing, on the side it is already nearer to. Committing
+   * early is what makes the difference — a body that turns at a fixed rate has
+   * to start its turn a turning circle out or it cannot make it at all.
+   *
+   * Sight, not planning. It goes round one obstacle at a time and can still
+   * walk into a pocket, which is what `balk` is for.
+   * @protected
+   */
+  skirt(desired, place, context = {}) {
+    const barriers = context.farm?.barriersFor(this) ?? [];
+    const ahead = { x: Math.cos(desired), y: Math.sin(desired) };
+    const reach = this.turningCircle * 2;
+    const toPlace = place ? distance(this, place) : Infinity;
+
+    let nearest = null;
+    for (const barrier of barriers) {
+      // Whatever it is walking *to* is never in its way, even when it is in
+      // the middle of the thing: a pond is drunk from its centre, and skirting
+      // that would mean never arriving.
+      if (place && distance(place, barrier) < barrier.radius) continue;
+
+      const bx = barrier.x - this.x;
+      const by = barrier.y - this.y;
+      const along = bx * ahead.x + by * ahead.y;     // how far down the line it lies
+      const across = ahead.x * by - ahead.y * bx;    // how far off it, and which side
+      // Half a body of clearance on top of the two radii, because it steers by
+      // turning rather than by stepping sideways and will not hold the line exactly.
+      const room = barrier.radius + this.radius * 1.5;
+
+      if (along <= 0 || along > reach || along > toPlace) continue;  // behind, too far off, or past the goal
+      if (Math.abs(across) >= room) continue;                        // the line misses it
+      if (nearest && along >= nearest.along) continue;
+      nearest = { bx, by, along, across, room };
+    }
+    if (!nearest) return desired;
+
+    const { bx, by, across, room } = nearest;
+    const away = Math.hypot(bx, by);
+    // Already inside it — water risen around its feet, most likely. Straight
+    // out of the middle is the shortest way back to dry ground.
+    if (away <= room) return Math.atan2(-by, -bx);
+
+    const clearance = Math.asin(Math.min(1, room / away));
+    return normalizeAngle(Math.atan2(by, bx) + (across > 0 ? -clearance : clearance));
   }
 
   /**
@@ -723,6 +816,7 @@ export default class Animal {
       { label: "Sex", value: this.sex === "female" ? "♀ female" : "♂ male" },
       { label: "Breed", value: this.breed },
       { label: "Age", value: this.isAdult ? `${this.age} yr` : "newborn" },
+      { label: "Awake", value: this.constructor.nocturnal ? "at night" : "by day" },
       { label: "Favorite food", value: this.favoriteFood },
     ];
   }
