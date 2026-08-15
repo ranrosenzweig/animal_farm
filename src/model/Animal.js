@@ -2,7 +2,7 @@ import { nextId, pick, random, randomAngle, randomInt } from "./random.js";
 import { PASTURE, angleDifference, distance, normalizeAngle } from "./pasture.js";
 import { DRIVES, clamp01, startingDrives } from "./drives.js";
 import { GOALS, atGoal, companyFor } from "./goals.js";
-import { RESOURCE_NAMES } from "./Resource.js";
+import { RESOURCE_NAMES, WATER_DRAG } from "./Resource.js";
 import { groundAt, slopeAt } from "./terrain.js";
 import { GRAVITY, STOPPED, integrate, responseTime } from "./physics.js";
 import ScriptedMind from "./minds/ScriptedMind.js";
@@ -58,10 +58,22 @@ export default class Animal {
   /** @type {number} Personal space; two animals may not come closer than the sum of their radii. */
   static radius = 5;
   /**
-   * @type {number} The most it can swing its facing in one step, in radians.
-   * Small means wide, committed arcs; large means it can pivot on the spot.
+   * @type {number} The most it can swing its facing in one step, in radians,
+   * at its cruising speed. Small means wide, committed arcs; large means it
+   * can come about smartly.
    */
   static turnRate = 0.35;
+
+  /**
+   * @type {number} What fraction of that it has standing still. A body turns
+   * by leaning into ground it is already covering, so a stopped animal
+   * shuffles its feet round and a moving one carves.
+   *
+   * Deliberately not zero. An animal that has come to a halt facing a wall
+   * would otherwise never be able to turn away from it — its own stillness
+   * would hold it there, which is a deadlock rather than a piece of realism.
+   */
+  static pivot = 0.25;
 
   /**
    * @type {Record<string, number>} How much this kind cares about each goal,
@@ -278,7 +290,7 @@ export default class Animal {
    * and travel however far the velocity carries it. What it runs into on the
    * way is the Farm's business, not its own.
    */
-  push() {
+  push(context = {}) {
     const force = this.forces();
     if (!force) {
       this.velocity.x = 0;
@@ -286,10 +298,24 @@ export default class Animal {
       return this;
     }
 
-    integrate(this, force, this.dragCoefficient * groundAt(this).drag, this.topSpeed);
+    integrate(this, force, this.dragCoefficient * this.footing(context), this.topSpeed);
     this.x += this.velocity.x;
     this.y += this.velocity.y;
     return this;
+  }
+
+  /**
+   * How much the stuff underfoot resists it, on the scale where meadow is 1.
+   *
+   * Terrain can answer for itself, but water cannot: a pond is a Resource the
+   * farm holds, it moves and shrinks, and `terrain.js` has never heard of it.
+   * So water is asked of the farm when there is one to ask — and when there
+   * isn't, an animal is simply on the ground it is standing on.
+   * @private
+   */
+  footing({ farm } = {}) {
+    if (farm?.inWater(this)) return WATER_DRAG;
+    return groundAt(this).drag;
   }
 
   /** The goal it is currently pursuing. */
@@ -685,7 +711,33 @@ export default class Animal {
     if (this.isStill()) return this.facing;
     const place = this.goalPlace(context);
     const wanted = place ? this.headingToward(place) : this.roamHeading(context);
-    return this.skirt(wanted, place, context);
+    return this.followFence(this.skirt(wanted, place, context));
+  }
+
+  /**
+   * A heading that does not walk into the fence.
+   *
+   * A rail takes the part of a push that would cross it and leaves the rest,
+   * so a body leaning into one slides along it at a fair clip — with its nose
+   * still in the rail, for as long as the fence lasts, because nothing in what
+   * an animal wants knows the fence is there. That is most of what looked like
+   * walking sideways.
+   *
+   * So the part of the heading that would cross the line is simply dropped.
+   * What is left runs along the rail, which is what an animal that has met a
+   * fence actually does; and one that has walked into a corner turns about,
+   * because there is nothing else to be done in a corner.
+   * @protected
+   */
+  followFence(desired) {
+    // A stride and a body: it starts turning before its nose is in the rail.
+    const reach = this.radius + this.stepSize;
+    let dx = Math.cos(desired);
+    let dy = Math.sin(desired);
+    if (dx > 0 ? this.x > PASTURE.maxX - reach : this.x < PASTURE.minX + reach) dx = 0;
+    if (dy > 0 ? this.y > PASTURE.maxY - reach : this.y < PASTURE.minY + reach) dy = 0;
+    if (dx === 0 && dy === 0) return normalizeAngle(desired + Math.PI);
+    return Math.atan2(dy, dx);
   }
 
   /**
@@ -771,13 +823,26 @@ export default class Animal {
   }
 
   /**
-   * Swing the facing toward `desired`, by no more than `turnRate`, offset by
-   * however far it is currently veering to get around something.
+   * How far it can swing its facing this step: the full `turnRate` at cruising
+   * speed, down to `pivot` of it at a standstill, and never more than the full
+   * rate however fast something else has flung it.
+   */
+  get agility() {
+    const { pivot } = this.constructor;
+    const carving = Math.min(1, this.speed / this.stepSize);
+    return this.turnRate * (pivot + (1 - pivot) * carving);
+  }
+
+  /**
+   * Swing the facing toward `desired`, by no more than it can turn at the
+   * speed it is going, offset by however far it is currently veering to get
+   * around something.
    * @returns {number} the facing it ends up with — the only way it can walk
    */
   turnToward(desired) {
+    const rate = this.agility;
     const wanted = angleDifference(desired + this.veer, this.facing);
-    const turn = Math.max(-this.turnRate, Math.min(this.turnRate, wanted));
+    const turn = Math.max(-rate, Math.min(rate, wanted));
     this.facing = normalizeAngle(this.facing + turn);
     return this.facing;
   }

@@ -104,6 +104,17 @@ export default class Farm {
   /* ---------------------------------------------------------------- */
 
   /**
+   * Is this point in the water at all? Not the deep part — any of it. A duck
+   * swimming and a cow wading at the rim are both in it, and both find it
+   * heavy going; only the Farm can say, because water is not terrain.
+   */
+  inWater(point) {
+    return this.resources.some(
+      (r) => r.kind === "water" && !r.depleted && distance(point, r) < r.radius,
+    );
+  }
+
+  /**
    * The middles of the pools, as circles: water too deep to stand up in, and
    * so a body to everything that cannot swim. Grass is not here — a patch of
    * grass is somewhere to be, not something to walk around.
@@ -458,7 +469,7 @@ export default class Farm {
     mover.keepCompany(context.neighbors);
     // A goal pursued by standing still is pursued facing wherever it already was.
     if (!mover.isStill()) mover.turnToward(mover.heading(context));
-    mover.push();
+    mover.push(context);
   }
 
   /**
