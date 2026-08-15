@@ -15,6 +15,23 @@ import ScriptedMind from "./model/minds/ScriptedMind.js";
 import ClaudeMind from "./model/minds/ClaudeMind.js";
 import { sourceOf } from "./sources.js";
 
+/**
+ * How far up each glyph its own legs reach, in em of the sprite's type.
+ *
+ * Emoji animals come with legs already drawn, so a second set painted under
+ * them is legs on top of legs however it is placed — that is not a positioning
+ * problem, it is one pair too many. So the glyph is cut off at this line and
+ * the walking legs are drawn in the gap: what moves is the animal's own legs,
+ * in the place its own legs were.
+ *
+ * Calibrated by eye against the system emoji font, which is the only place
+ * these glyphs exist. Another font draws them differently and these would want
+ * re-checking — which is what a per-species number is for.
+ */
+const LEG_LINE = {
+  Cow: 0.3, Horse: 0.3, Sheep: 0.24, Pig: 0.22, Chicken: 0.28, Duck: 0.2,
+};
+
 /** How each goal reads on screen. Presentation only — the model has no icons. */
 const GOAL_ICONS = {
   graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️",
@@ -1108,21 +1125,32 @@ export default function FarmModel() {
            and stand under it when it is not. Sized in em, so a newborn on its
            smaller type gets smaller legs without being told. Behind the glyph,
            by the same negative z-index trick the shade uses. */
+        /* Only the character is cut, not its whole layer — the legs are drawn
+           in the same box and a clip on the parent would take them off too. */
+        .fa-sprite .glyph {
+          display: block;
+          /* The box hugs the character, so the cut lands on the drawn legs and
+             not on the empty space a line box leaves beneath them. */
+          line-height: 1;
+          clip-path: inset(0 0 var(--legline, 0.24em) 0);
+        }
         .fa-sprite .legs {
           position: absolute;
           left: 50%;
-          /* Below the glyph's own feet, not behind its body: an emoji animal is
-             drawn solid, so legs tucked up inside it are legs nobody can see. */
-          bottom: -0.13em;
+          /* Exactly the gap the cut opened, so each leg hangs from the body
+             where that animal's own legs were taken off. */
+          bottom: 0;
+          height: var(--legline, 0.24em);
           transform: translateX(-50%);
           display: flex;
-          gap: 0.17em;
+          align-items: flex-start;
+          gap: 0.1em;
           z-index: -1;
         }
         .fa-sprite .legs i {
           display: block;
-          width: 0.08em;
-          height: 0.24em;
+          width: 0.075em;
+          height: 100%;
           background: linear-gradient(180deg, #6b5236 0%, #3f3020 100%);
           border-radius: 0 0 0.04em 0.04em;
           /* Swings from the shoulder, which is the top of the post. */
@@ -2117,6 +2145,7 @@ export default function FarmModel() {
                 // or through mud swings them slower, because it is the same
                 // legs covering less ground.
                 "--stride": `${Math.round(Math.min(1400, (stepMs * 1.6 * a.stepSize) / Math.max(a.speed, 0.2)))}ms`,
+                "--legline": `${LEG_LINE[a.species] ?? 0.24}em`,
               }}
               onClick={(event) => {
                 // While placing, let the click through to the pasture beneath.
@@ -2138,7 +2167,7 @@ export default function FarmModel() {
                 <span className="legs" aria-hidden="true">
                   {Array.from({ length: a.legs }, (_, i) => <i key={i} />)}
                 </span>
-                {a.emoji}
+                <span className="glyph">{a.emoji}</span>
                 {a.isPregnant && <span className="expecting">🤰</span>}
               </span>
               {showTags && (

@@ -3,7 +3,7 @@ import { randomInt } from "../random.js";
 
 export default class Chicken extends Animal {
   static species = "Chicken";
-  static emoji = "🐔";
+  static emoji = "🐓";   // the whole bird, not the head — it has legs to walk on
   static color = "#C9922F";
   static diet = ["corn", "seeds", "mealworms"];
   static breeds = ["Rhode Island Red", "Leghorn", "Plymouth Rock", "Silkie"];

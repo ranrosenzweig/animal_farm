@@ -4,7 +4,7 @@ import { PASTURE } from "../pasture.js";
 
 export default class Horse extends Animal {
   static species = "Horse";
-  static emoji = "🐴";
+  static emoji = "🐎";   // the whole horse, not the head — it has legs to walk on
   static color = "#5C3A22";
   static diet = ["oats", "apples", "carrots"];
   static breeds = ["Appaloosa", "Clydesdale", "Mustang", "Arabian"];
