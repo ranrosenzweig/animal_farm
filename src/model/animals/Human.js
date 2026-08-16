@@ -1,7 +1,21 @@
 import Animal from "../Animal.js";
 import { distance } from "../pasture.js";
-import { RESOURCE_KINDS } from "../Resource.js";
+import { ENOUGH, RESOURCE_KINDS } from "../Resource.js";
 import { clamp01 } from "../drives.js";
+
+/**
+ * What each kind of work takes, and what it looks like from the fence.
+ *
+ * Grass is cut and carted, water is piped: a man on foot with a bucket is not
+ * how either job is actually done. Both live at the house and he can only have
+ * one of them with him, which is the whole weight this carries — switching
+ * from the troughs to the meadows means a trip home first, and that trip is
+ * time the herd spends drinking whatever is left.
+ */
+const TOOLS = {
+  grass: { name: "tractor", emoji: "🚜", takes: "hitches up the tractor", drives: "takes the tractor out to" },
+  water: { name: "hose", emoji: "🚿", takes: "uncoils the hose", drives: "runs the hose out to" },
+};
 
 /**
  * The farmer. He stands in the field on the same terms as everything else in
@@ -84,6 +98,21 @@ export default class Human extends Animal {
     this.drives.urge = 0;
     /** What is left of the barn's stores. His own, not the farm's. */
     this.stores = new.target.stores;
+    /** How much he has put on the field since he started, by kind. */
+    this.carried = { water: 0, grass: 0 };
+    /** How many sources he has started from nothing. */
+    this.sown = 0;
+    /** Which source he is currently filling, so a new errand reads as one. */
+    this.filling = null;
+    /** The implement in his hands: "tractor", "hose", or nothing yet. */
+    this.tool = null;
+    /**
+     * What he finished doing this step, for whoever is keeping the log — a
+     * chore worth a line, not the pouring itself. Null on every step where he
+     * only carried on with what he was already doing.
+     * @type {{ act: string, source: Resource, notice: string } | null}
+     */
+    this.chore = null;
   }
 
   /**
@@ -98,6 +127,7 @@ export default class Human extends Animal {
    */
   feel(context = {}) {
     super.feel(context);
+    this.chore = null;
     const { yields, stores } = this.constructor;
     // Before the guard below, or a barn that ever reached empty would stay
     // empty however long the well ran.
@@ -113,29 +143,141 @@ export default class Human extends Animal {
     const { farm } = context;
     if (!farm || this.stores <= 0) return;
 
-    for (const { kind, sources } of farm.stock()) {
-      if (sources > 0) continue;
-      const volume = Math.min(this.stores, RESOURCE_KINDS[kind].capacity * 0.3);
-      farm.sow(kind, this, volume);
-      this.stores -= volume;
+    // The implements live at the house and he can carry one. Swapping is the
+    // only thing he can do about the wrong one being in his hands, and the
+    // house is the only place he can do it.
+    const wanted = TOOLS[this.wants(farm)]?.name ?? null;
+    if (wanted && wanted !== this.tool && this.atHome()) {
+      this.tool = wanted;
+      const took = Object.values(TOOLS).find((t) => t.name === wanted);
+      this.chore = { act: "took", source: null, notice: `${this.name} ${took.takes}.` };
     }
 
-    if (this.goal !== "tend") return;
-    const source = this.goalPlace(context);
-    if (source && distance(this, source) < source.radius + this.radius) {
-      this.stores -= source.refill(Math.min(this.stores, this.constructor.pours));
+    for (const { kind, sources } of farm.stock()) {
+      if (sources > 0 || this.tool !== TOOLS[kind].name) continue;
+      const volume = Math.min(this.stores, RESOURCE_KINDS[kind].capacity * 0.3);
+      const started = farm.sow(kind, this, volume);
+      this.stores -= volume;
+      this.carried[kind] += volume;
+      this.sown += 1;
+      this.chore = {
+        act: "sowed",
+        source: started,
+        notice: `${this.name} sows a fresh ${started.name.toLowerCase()} — the field had no ${kind} left.`,
+      };
     }
+
+    if (this.goal !== "tend") {
+      // The errand is over when he stops tending — not when he drifts a step
+      // out of reach, which he does constantly while milling about a trough,
+      // and which used to have him announce the same job twice.
+      this.filling = null;
+      return;
+    }
+    // The same place his steering is aimed at, so what he fills is what he
+    // walked to — including the case where that is the house and a swap.
+    const source = this.goalPlace(context);
+    if (!source?.refill || this.tool !== TOOLS[source.kind].name) return;
+    if (distance(this, source) >= source.radius + this.radius) return;
+
+    // An errand reads as two lines however many steps it takes: setting to work
+    // on a source he was not filling a moment ago, and having it back above the
+    // level that made it a chore. The dozen steps of pouring in between are the
+    // same errand and say nothing new.
+    const wanting = source.fullness < ENOUGH;
+    if (this.filling !== source.id) {
+      this.filling = source.id;
+      this.chore = {
+        act: "started",
+        source,
+        notice: `${this.name} ${TOOLS[source.kind].drives} ${source.name}, down to ` +
+          `${Math.round(source.volume)} ${source.unit}.`,
+      };
+    }
+
+    const got = source.refill(Math.min(this.stores, this.constructor.pours));
+    this.stores -= got;
+    this.carried[source.kind] += got;
+    if (wanting && source.fullness >= ENOUGH) {
+      this.filling = null;
+      this.chore = {
+        act: "topped",
+        source,
+        notice: `${this.name} has ${source.name} back up to ${Math.round(source.volume)} ${source.unit}.`,
+      };
+    }
+  }
+
+  /**
+   * The work in front of him, as a resource kind: whatever has run out of the
+   * field altogether, and failing that the emptiest source left. Null when
+   * everything is comfortable and there is nothing to fetch a tool for.
+   */
+  wants(farm) {
+    const gone = farm.stock().find((s) => s.sources === 0)?.kind;
+    if (gone) return gone;
+    // He finishes the round he is equipped for before changing implements.
+    // Without this he re-decides every step, and since one pour is enough to
+    // make the *other* kind the emptiest, he spends his day walking between
+    // the shed and nothing — thirteen swaps and five litres, when it was
+    // measured. What he carries is what he works on until that work is done.
+    const his = this.works;
+    if (his && farm.neediestResource(ENOUGH, his)) return his;
+    return farm.neediestResource()?.kind ?? null;
+  }
+
+  /**
+   * Where the chore actually sends him. The goal names the emptiest source,
+   * but a man holding a hose can do nothing at a meadow — so with the wrong
+   * implement in his hands the first leg of the errand is the house, and only
+   * then the field. Everything else steers as it does for any animal.
+   */
+  goalPlace(context = {}) {
+    const { farm } = context;
+    if (this.goal !== "tend" || !farm) return super.goalPlace(context);
+    const kind = this.wants(farm);
+    if (!kind) return null;
+    if (TOOLS[kind].name !== this.tool) return this.constructor.home;
+    // Not the emptiest source on the farm — the emptiest of the sort he is
+    // carrying the implement for. The other sort is a different errand.
+    return farm.neediestResource(ENOUGH, kind);
   }
 
   /** With nothing that needs doing, he heads back to the house. */
   roamHeading() { return this.headingToward(this.constructor.home); }
 
+  /** Standing in his own yard, near enough to call it home. */
+  atHome() { return distance(this, this.constructor.home) < this.radius * 2; }
+
+  /**
+   * Resting is somewhere, for him. Every animal here rests where it happens to
+   * be standing — `rest` names no place, so a tired cow folds up in the mud —
+   * but a farmer goes indoors. He is only still once he is home, and until then
+   * `rest` steers him there the same way having nothing to do does: the goal
+   * names no place, so it falls through to `roamHeading`, which is the path to
+   * his door. Then he is in for the night, because the hour keeps rest winning
+   * until morning.
+   */
+  isStill() { return super.isStill() && this.atHome(); }
+
   makeSound() { return `${this.name} whistles a tune — E-I-E-I-O.`; }
   move() { return `${this.name} walks the fence line, counting heads.`; }
+
+  /** What he is holding, drawn on the field: a tractor is not a man on foot. */
+  get emoji() { return this.tool ? TOOLS[this.works].emoji : super.emoji; }
+
+  /** No legs on a tractor. The UI draws none and stops cropping the glyph. */
+  get legs() { return this.tool ? 0 : super.legs; }
+
+  /** The kind of work the implement in his hands is for. */
+  get works() { return Object.keys(TOOLS).find((kind) => TOOLS[kind].name === this.tool); }
 
   /** He eats from the same fields he keeps; "crops at the grass" he does not. */
   narrate() {
     if (this.goal === "graze") return `${this.name} takes his own dinner from the field.`;
+    if (this.goal === "tend" && this.tool) {
+      return `${this.name} is out with the ${this.tool}.`;
+    }
     return super.narrate();
   }
 
@@ -146,6 +288,10 @@ export default class Human extends Animal {
     return [
       ...super.getAttributes(),
       { label: "In the barn", value: `${Math.round(this.stores)} left to put down` },
+      {
+        label: "In his hands",
+        value: this.tool ? `${TOOLS[this.works].emoji} ${this.tool}` : "nothing — both are at the house",
+      },
     ];
   }
 }

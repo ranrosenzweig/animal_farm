@@ -7,7 +7,7 @@ import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic, slide,
 } from "./physics.js";
-import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
+import Resource, { DEEP, ENOUGH, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
 import { OPENING, clockAt, clockStep, productivity } from "./clock.js";
 
 /**
@@ -211,11 +211,15 @@ export default class Farm {
    * The source most in need of a bucket: the emptiest one still in the field,
    * and only once it has fallen below `below` — a trough that is nearly full
    * is not a chore. Null when everything is comfortable.
+   *
+   * `kind` narrows it to one sort of source, which is what somebody already
+   * carrying the implement for that sort of work wants to know.
    * @returns {Resource | null}
    */
-  neediestResource(below = 0.6) {
+  neediestResource(below = ENOUGH, kind = null) {
     let worst = null;
     for (const resource of this.resources) {
+      if (kind && resource.kind !== kind) continue;
       if (resource.depleted || resource.fullness >= below) continue;
       if (!worst || resource.fullness < worst.fullness) worst = resource;
     }
@@ -649,7 +653,20 @@ export default class Farm {
       died: mover.isAlive() ? [] : [mover],
       born,
       contests,
+      chores: this.choresDone(),
     };
+  }
+
+  /**
+   * What anybody finished doing *to the field* this round — the farmer topping
+   * a trough back up, or sowing a fresh patch where a kind had run out. Read
+   * off the animals rather than worked out here, because only the one doing it
+   * knows when it counts as done; the farm's part is knowing who to ask.
+   * @returns {{ by: import("./Animal.js").default, act: string, source: Resource, notice: string }[]}
+   * @private
+   */
+  choresDone() {
+    return this.animals.filter((a) => a.chore).map((a) => ({ by: a, ...a.chore }));
   }
 
   /**
@@ -678,6 +695,7 @@ export default class Farm {
       died: this.animals.filter((a) => !a.isAlive()),
       dried: this.resources.filter((r) => r.depleted),
       contests,
+      chores: this.choresDone(),
     };
   }
 
