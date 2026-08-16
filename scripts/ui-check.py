@@ -18,10 +18,7 @@ from playwright.sync_api import sync_playwright
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 SPECIES = ["Cow", "Chicken", "Pig", "Sheep", "Horse", "Duck", "Human"]
-# Every pen but the farmer's offers a +. There is one Old MacDonald, so his pen
-# is a chip and nothing else — and a + that reappeared there would show up here
-# as a species this cannot stock.
-STOCKABLE = [s for s in SPECIES if s != "Human"]
+STOCKABLE = SPECIES
 STEP_MS = 600
 
 findings = []
@@ -204,14 +201,7 @@ def check_every_pen(page):
              "(before → after)")
         return
 
-    stocked = [s for s in SPECIES if s not in STOCKABLE
-               and page.get_by_role("button", name=f"Add a {s.lower()}", exact=True).count()]
-    if stocked:
-        fail(f"the farm has one of each of {', '.join(stocked)} — that pen should carry no +")
-        return
-
-    note(f"All {len(STOCKABLE)} stockable pens' + buttons added their own species, "
-         f"and {', '.join(s for s in SPECIES if s not in STOCKABLE)} has none to press.")
+    note(f"All {len(STOCKABLE)} pens' + buttons added their own species.")
 
 
 def check_place_water(page):

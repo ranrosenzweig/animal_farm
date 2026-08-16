@@ -1,7 +1,8 @@
 import Animal from "../Animal.js";
 import { distance } from "../pasture.js";
-import { ENOUGH, RESOURCE_KINDS } from "../Resource.js";
+import { ENOUGH, RESOURCE_KINDS, SAFE } from "../Resource.js";
 import { clamp01 } from "../drives.js";
+import { pick, randomInt } from "../random.js";
 
 /**
  * What each kind of work takes, and what it looks like from the fence.
@@ -44,13 +45,21 @@ export default class Human extends Animal {
   static color = "#3F5A7D";
   static diet = ["bread", "cheese", "apples"];
   static breeds = ["Farmer"];
-  static names = ["Old MacDonald"];
+  // Old MacDonald owns the place and `Farm.starter` names him directly. These
+  // are the hands: one pair of them keeps a herd this size alive where one man
+  // alone watches it dwindle, which is the whole argument for hiring. Kept by
+  // sex, so a farm does not end up with a Maud who is drawn as a man.
+  static hands = {
+    female: ["Maud", "Etta", "Ruthie", "Nell", "Vera"],
+    male: ["Hollis", "Jeb", "Cal", "Silas", "Amos"],
+  };
+
+  static names = [...Human.hands.female, ...Human.hands.male];
   static stepSize = 3.4;   // brisk; he has rounds to make
   static mass = 80;
   static radius = 4.5;
   static legs = 2;
   static turnRate = 0.5;
-  static solitary = true;  // there is one farmer, and this is him
 
   // The chores come first, and nothing else here does them. He does not breed
   // — that is not what he is on the field for — and he is far too dignified to
@@ -59,8 +68,24 @@ export default class Human extends Animal {
   static driveRates = { hunger: 0.003, thirst: 0.005, fatigue: 0.003, loneliness: 0.002, urge: 0 };
   static intake = 0.7;
 
+  /**
+   * How far he will go out of his way for a dying animal. Not far, and that is
+   * the point: a bucket saves the one beast in front of him, a filled trough
+   * saves whoever comes to it all day, so the field work only loses to a
+   * rescue he can make cheaply. With no limit he never fills anything again.
+   */
+  static reaches = 20;
+
   /** How much he pours in per step spent at a source, in that source's units. */
   static pours = 2.5;
+
+  /**
+   * How much of an animal's hunger or thirst one step of his attention takes
+   * off it, 0–1. Half again what the animal would get for itself at a full
+   * trough, because it is being handed to it and it is not queueing for it —
+   * which is the whole reason he is standing there.
+   */
+  static eases = 0.09;
 
   /**
    * What the farmhouse and the barn behind it hold, in resource units — hay in
@@ -91,8 +116,6 @@ export default class Human extends Animal {
 
   constructor(name, breed, age) {
     super(name, breed, age);
-    // Old MacDonald is a he. Nothing here tosses a coin over that.
-    this.sex = "male";
     // Nothing raises it and nothing relieves it, so left as it starts it would
     // sit on his card forever as a bar that means nothing.
     this.drives.urge = 0;
@@ -102,6 +125,10 @@ export default class Human extends Animal {
     this.carried = { water: 0, grass: 0 };
     /** How many sources he has started from nothing. */
     this.sown = 0;
+    /** How many animals he has gone out to with a bucket. */
+    this.nursed = 0;
+    /** Which one he is seeing to, so a rescue reads as one line. */
+    this.nursing = null;
     /** Which source he is currently filling, so a new errand reads as one. */
     this.filling = null;
     /** The implement in his hands: "tractor", "hose", or nothing yet. */
@@ -153,18 +180,26 @@ export default class Human extends Animal {
       this.chore = { act: "took", source: null, notice: `${this.name} ${took.takes}.` };
     }
 
-    for (const { kind, sources } of farm.stock()) {
-      if (sources > 0 || this.tool !== TOOLS[kind].name) continue;
-      const volume = Math.min(this.stores, RESOURCE_KINDS[kind].capacity * 0.3);
-      const started = farm.sow(kind, this, volume);
-      this.stores -= volume;
-      this.carried[kind] += volume;
-      this.sown += 1;
-      this.chore = {
-        act: "sowed",
-        source: started,
-        notice: `${this.name} sows a fresh ${started.name.toLowerCase()} — the field had no ${kind} left.`,
-      };
+    // A kind gone from the field altogether, which is the one thing a bucket
+    // cannot fix: he sows a fresh one where he stands. Where he stands, and not
+    // some better-chosen ground across the field — every step of that walk is a
+    // step the herd spends with nothing of that kind at all, and the field
+    // opens with its sources already spread.
+    const short = farm.stock().find((s) => s.sources === 0)?.kind;
+    if (short && this.tool === TOOLS[short]?.name) {
+      const volume = Math.min(this.stores, RESOURCE_KINDS[short].capacity * 0.3);
+      const started = farm.sow(short, this, volume);
+      if (started) {
+        this.stores -= volume;
+        this.carried[short] += volume;
+        this.sown += 1;
+        this.chore = {
+          act: "sowed",
+          source: started,
+          notice: `${this.name} sows a fresh ${started.name.toLowerCase()} — ` +
+            `the field had no ${short} left at all.`,
+        };
+      }
     }
 
     if (this.goal !== "tend") {
@@ -174,8 +209,30 @@ export default class Human extends Animal {
       this.filling = null;
       return;
     }
-    // The same place his steering is aimed at, so what he fills is what he
-    // walked to — including the case where that is the house and a swap.
+    // Who he is seeing to is settled before anything else, because it decides
+    // where he is walking as well as what he does when he gets there.
+    const patient = this.patientFor(farm);
+    if (patient && patient.id !== this.nursing) {
+      this.nursed += 1;
+      this.chore = {
+        act: "nursed",
+        source: null,
+        notice: `${this.name} drops everything for ${patient.name} the ` +
+          `${patient.species.toLowerCase()}, down at ${Math.round(patient.health * 100)}% and going.`,
+      };
+    }
+    this.nursing = patient?.id ?? null;
+
+    // An animal, and close enough to hold a bucket under its nose. The farm
+    // does the giving: what one animal owes another is not the giver's to
+    // settle, and the farmer cannot read a cow's thirst in the first place.
+    if (patient) {
+      if (distance(this, patient) >= this.radius + patient.radius + 1) return;
+      const helped = farm.nurse(patient, this.constructor.eases);
+      if (helped) this.stores -= helped.given;
+      return;
+    }
+
     const source = this.goalPlace(context);
     if (!source?.refill || this.tool !== TOOLS[source.kind].name) return;
     if (distance(this, source) >= source.radius + this.radius) return;
@@ -203,7 +260,8 @@ export default class Human extends Animal {
       this.chore = {
         act: "topped",
         source,
-        notice: `${this.name} has ${source.name} back up to ${Math.round(source.volume)} ${source.unit}.`,
+        notice: `${this.name} has ${source.name} back up to ` +
+          `${Math.round(source.volume)} ${source.unit}.`,
       };
     }
   }
@@ -213,6 +271,25 @@ export default class Human extends Animal {
    * field altogether, and failing that the emptiest source left. Null when
    * everything is comfortable and there is nothing to fetch a tool for.
    */
+  /**
+   * The animal he is seeing to, and he sees one through before he looks up.
+   *
+   * Whoever he is already with keeps him until they are well clear of the
+   * limit — not merely off it, or the moment a mouthful takes the edge off one
+   * beast he would set out after the next and neither would get enough. He
+   * only casts about for a new one when the one in front of him is safe.
+   */
+  patientFor(farm) {
+    const { reaches } = this.constructor;
+    // Same order as the steering: with a kind gone from the field he has
+    // something to do that helps everyone, and no way to do it from out here.
+    if (farm.stock().some((s) => s.sources === 0)) return null;
+    const his = this.nursing && farm.find(this.nursing);
+    const trouble = his && Math.max(his.drives.hunger, his.drives.thirst);
+    if (his?.isAlive() && trouble > SAFE && distance(this, his) < reaches * 2) return his;
+    return farm.neediestAnimal(this, reaches);
+  }
+
   wants(farm) {
     const gone = farm.stock().find((s) => s.sources === 0)?.kind;
     if (gone) return gone;
@@ -235,12 +312,46 @@ export default class Human extends Animal {
   goalPlace(context = {}) {
     const { farm } = context;
     if (this.goal !== "tend" || !farm) return super.goalPlace(context);
+
+    // A kind gone from the field outranks even a dying animal, and that is not
+    // callousness — it is the only order that works. A rescue takes him away
+    // from the house, he can only swap implements at the house, and he cannot
+    // sow grass without the tractor: with the bucket first, a bare field kept
+    // him permanently on rescues and the grass never came back at all, so the
+    // dying never stopped. Grass for everyone beats a bucket for one.
     const kind = this.wants(farm);
+    const bare = farm.stock().some((s) => s.sources === 0);
+
+    // Otherwise, whoever he has taken on. A full trough is no use to an animal
+    // dying beside it, and that is measurably how they die here — fifteen
+    // deaths in a row with water in the field, some of them within a body's
+    // length of it. No tractor needed to hold a bucket.
+    const patient = !bare && this.nursing && farm.find(this.nursing);
+    if (patient) return patient;
     if (!kind) return null;
     if (TOOLS[kind].name !== this.tool) return this.constructor.home;
-    // Not the emptiest source on the farm — the emptiest of the sort he is
-    // carrying the implement for. The other sort is a different errand.
+    // Otherwise the emptiest of the sort he is carrying the implement for.
+    // Not the emptiest on the farm — the other sort is a different errand.
     return farm.neediestResource(ENOUGH, kind);
+  }
+
+  /**
+   * A farmer gets out of bed for a dying animal.
+   *
+   * Everything on this farm wants to sleep at night — the hour cubes every
+   * want but resting, which is what keeps the herd down through the dark. It
+   * is also what had him asleep through half of every emergency: measured, an
+   * animal was pinned at a fatal drive on 891 steps of a run and he was in his
+   * bed for 430 of them. So the chores answer at full pressure while somebody
+   * is actually going, and at the ordinary standing pressure otherwise.
+   *
+   * Narrow on purpose. It reads the farm's own list of the dying rather than
+   * amplifying a drive of his own, and it moves nothing for any other animal:
+   * the herd sleeps through the night exactly as it did.
+   */
+  pressureFor(goalName, context = {}) {
+    if (goalName === "tend" && context.farm?.neediestAnimal(this, this.constructor.reaches)) return 1;
+    return super.pressureFor(goalName, context);
   }
 
   /** With nothing that needs doing, he heads back to the house. */
@@ -263,8 +374,16 @@ export default class Human extends Animal {
   makeSound() { return `${this.name} whistles a tune — E-I-E-I-O.`; }
   move() { return `${this.name} walks the fence line, counting heads.`; }
 
-  /** What he is holding, drawn on the field: a tractor is not a man on foot. */
-  get emoji() { return this.tool ? TOOLS[this.works].emoji : super.emoji; }
+  /**
+   * What is drawn on the field: whatever he is driving if he is driving
+   * something, and otherwise the farmer himself. Both farmer glyphs are ZWJ
+   * sequences and both were checked against the system font — unlike the
+   * person farmer, which comes apart into a face and a plant.
+   */
+  get emoji() {
+    if (this.tool) return TOOLS[this.works].emoji;
+    return this.sex === "female" ? "👩‍🌾" : super.emoji;
+  }
 
   /** No legs on a tractor. The UI draws none and stops cropping the glyph. */
   get legs() { return this.tool ? 0 : super.legs; }
@@ -281,8 +400,13 @@ export default class Human extends Animal {
     return super.narrate();
   }
 
-  /** One farmer, one name, one age. There is only ever the one of him. */
-  static random() { return new Human("Old MacDonald", "Farmer", 67); }
+  /** A hired hand. The owner is built by name in `Farm.starter`, not here. */
+  static random() {
+    const sex = pick(["female", "male"]);
+    const hand = new this(pick(this.hands[sex]), "Farmhand", randomInt(19, 60));
+    hand.sex = sex;
+    return hand;
+  }
 
   getAttributes() {
     return [

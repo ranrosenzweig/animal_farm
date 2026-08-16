@@ -44,6 +44,14 @@ export const setHeldLevels = (on) => { held = Boolean(on); };
  */
 export const ENOUGH = 0.6;
 
+/**
+ * How far down a hunger or a thirst has to come before the animal it belongs
+ * to is out of the farmer's hands again. Well clear of the limit, not merely
+ * off it: a mouthful that leaves a beast at 0.95 has not saved it, and a
+ * farmer who walked away there would be back in a dozen steps.
+ */
+export const SAFE = 0.55;
+
 export const RESOURCE_KINDS = {
   water: {
     kind: "water",
