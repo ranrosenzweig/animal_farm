@@ -65,6 +65,10 @@ export default class Farm {
   add(animal) {
     const spot = this.freeSpotFor(animal);
     if (!spot) return { farm: this, added: false };
+    // Same courtesy the newborns get: the name lists are short, and two
+    // animals answering to one name make a log nobody can follow. It matters
+    // most for the farmer, whose list is one name long by design.
+    animal.name = this.unusedName(animal.name);
     animal.moveTo(spot);
     return {
       farm: new Farm(this.name, [...this.animals, animal], this.resources, this.steps),

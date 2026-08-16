@@ -275,13 +275,12 @@ if (bare.size > 0) {
   const bareOf = kept.stock().filter((s) => s.sources === 0 || s.volume <= 0);
   if (!farmer) fail("tending: Old MacDonald did not survive 600 rounds of his own farm");
   if (herd === 0) fail("tending: the whole herd died in 600 rounds with the farmer on the field");
+  // Every drop of this was carried out of the barn: the field started with
+  // nothing on it, so a source standing here at all is one he put down.
   for (const s of bareOf) fail(`tending: 600 rounds in and the field has no ${s.kind} on it at all`);
-  if (farmer && farmer.stores >= Human.stores) {
-    fail(`tending: the barn is still full at ${Math.round(farmer.stores)} — he put nothing down`);
-  }
   if (failures === 0) {
     console.log(`Tending: 600 rounds on a field that started bare — ${herd} of ${SPECIES.length - 1} still ` +
-      `alive, ${Math.round(Human.stores - farmer.stores)} units out of the barn, ` +
+      `alive, ${Math.round(farmer.stores)} of ${Human.stores} left in the barn, ` +
       `field holding ${kept.stock().map((s) => `${s.volume} ${s.unit} of ${s.kind}`).join(" and ")}.`);
   }
 }

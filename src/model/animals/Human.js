@@ -15,8 +15,9 @@ import { RESOURCE_KINDS } from "../Resource.js";
  * stands, because a source that empties is off the field for good and no
  * amount of walking to it would bring it back.
  *
- * All of it comes out of the barn behind his house, and the barn is finite.
- * He lives in the yard below it: with nothing that needs doing he walks home,
+ * All of it comes out of the barn behind his house, which fills again slower
+ * than he empties it — so he is a man with a store and a well, not a tap. He
+ * lives in the yard below it: with nothing that needs doing he walks home,
  * which is also where his day ends.
  */
 export default class Human extends Animal {
@@ -48,13 +49,17 @@ export default class Human extends Animal {
   /**
    * What the farmhouse and the barn behind it hold, in resource units — hay in
    * the loft, water in the well. Everything he puts on the field comes out of
-   * here, and nothing puts it back, which is what keeps him a farmer rather
-   * than a miracle: an empty field still kills, it just takes him this much
-   * longer to lose it.
-   * ponytail: a plain number, spent and never earned. Give the barn a harvest
-   * if the farm should be able to keep itself.
+   * here, and it is what he can carry rather than what he can wish for.
    */
   static stores = 1400;
+
+  /**
+   * What comes back into the barn each step: the well drawing, the hay coming
+   * on. Well under what he pours out standing at a trough, so a big herd still
+   * outdrinks him and a small one he can keep going indefinitely — which is
+   * the whole difference between a farmer and a tap.
+   */
+  static yields = 0.25;
 
   /** The yard below the barn, which is where he lives and where he ends his day. */
   static home = { x: 85, y: 34 };
@@ -82,6 +87,11 @@ export default class Human extends Animal {
    */
   feel(context = {}) {
     super.feel(context);
+    const { yields, stores } = this.constructor;
+    // Before the guard below, or a barn that ever reached empty would stay
+    // empty however long the well ran.
+    this.stores = Math.min(stores, this.stores + yields);
+
     const { farm } = context;
     if (!farm || this.stores <= 0) return;
 
