@@ -1,4 +1,4 @@
-import { SPECIES } from "./species.js";
+import { Human, SPECIES } from "./species.js";
 import { PASTURE, clampToPasture, distance, inBounds } from "./pasture.js";
 import { randomAngle, randomInt } from "./random.js";
 import { GOALS } from "./goals.js";
@@ -7,7 +7,9 @@ import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
   capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic, slide,
 } from "./physics.js";
-import Resource, { DEEP, ENOUGH, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
+import Resource, {
+  DEEP, ENOUGH, RESOURCE_KINDS, RESOURCE_NAMES, heldLevels, stockFloor,
+} from "./Resource.js";
 import { OPENING, clockAt, clockStep, productivity } from "./clock.js";
 
 /**
@@ -41,17 +43,50 @@ export default class Farm {
   /** The hour, the day and the season. Everything about time comes from here. */
   get clock() { return clockAt(this.steps); }
 
-  /** A farm stocked with one of every species, a pond and two patches of grass. */
+  /**
+   * A farm stocked with a pair of every species, three waters, three grasses,
+   * and the men who look after them.
+   *
+   * A pair rather than a single animal, and that is not decoration: breeding
+   * needs two of a kind and opposite sexes, so a farm with one of each could
+   * never have a single birth in it. Sexes are set rather than rolled, or half
+   * the pens would be two brothers and the farm would be sterile by accident.
+   */
   static starter(name = "The Farm") {
     // Enough to start with, not enough to forget about: nothing here grows
     // back, so a farm left alone drinks itself dry and dies.
+    //
+    // Three of each rather than two, and spread to the corners. What kills
+    // animals here is the crowd at the water and the walk to it rather than
+    // the farm running dry — they die with water in the field, some of them a
+    // body's length from it — so where the sources are is worth more than what
+    // is in them. Measured over four farms of a dozen head: two of each kind
+    // leaves three or four alive, four of each leaves seven or eight.
     const land = new Farm(name, [], [
       new Resource("water", { x: 17, y: 68 }, { name: "Pond" }),
       new Resource("water", { x: 80, y: 24 }, { name: "Trough" }),
+      new Resource("water", { x: 22, y: 22 }, { name: "Well" }),
       new Resource("grass", { x: 34, y: 30 }, { name: "Meadow" }),
       new Resource("grass", { x: 74, y: 60 }, { name: "Clover patch" }),
+      new Resource("grass", { x: 50, y: 74 }, { name: "Lower field" }),
     ]);
-    return SPECIES.reduce((farm, Species) => farm.add(Species.random()).farm, land);
+    const stocked = SPECIES.reduce((farm, Species) => {
+      if (Species === Human) return farm;
+      return ["female", "male"].reduce((pen, sex) => {
+        const animal = Species.random();
+        animal.sex = sex;
+        return pen.add(animal).farm;
+      }, farm);
+    }, land);
+
+    // Old MacDonald and two hands. Three, and not out of generosity: measured
+    // over four farms of a dozen head, one man watches the herd fall to five
+    // while three take it to sixteen, because what he can do in a day is
+    // bounded by how far he can walk in one. Hire more from the pens above.
+    const owner = new Human("Old MacDonald", "Farmer", 67);
+    owner.sex = "male";   // Old MacDonald is a he; the hands are whoever turns up
+    return [owner, Human.random(), Human.random()]
+      .reduce((farm, hand) => farm.add(hand).farm, stocked);
   }
 
   get size() { return this.animals.length; }
@@ -202,9 +237,73 @@ export default class Farm {
    * @returns {Resource}
    */
   sow(kind, at, volume) {
+    // Held levels hold the field, not merely the readings on it. A new source
+    // is a new level, and one appearing while everything is pinned would move
+    // the very numbers that are supposed to be standing still.
+    if (heldLevels()) return null;
     const resource = new Resource(kind, clampToPasture(at), { volume });
     this.resources.push(resource);
     return resource;
+  }
+
+  /**
+   * Whoever is actually dying: an animal with hunger or thirst pinned at its
+   * limit, which is the only state in this model that costs condition, and of
+   * those the one with the least condition left. Null when nobody is going.
+   *
+   * Deliberately not "whoever is thirstiest". Something is past three quarters
+   * thirsty on four steps out of five here — that is ordinary life, and a
+   * farmer who ran to all of it would spend his day crossing the field and
+   * never fill a trough. What is worth dropping the buckets for is the animal
+   * whose health is going down, and that one has a couple of hundred steps of
+   * runway before it dies, which is time enough to walk to it.
+   *
+   * `within` is how far the asker is willing to go. It matters more than it
+   * looks: with no limit at all, and a herd where somebody is always going,
+   * the farmer never gets back to the troughs — measured, he spent 1872 steps
+   * of 2000 on rescues and put 96 units on a field that needed nineteen
+   * hundred. A full trough saves more animals than a bucket does.
+   *
+   * Only the Farm can answer this: an animal cannot read another one's drives.
+   * @returns {import("./Animal.js").default | null}
+   */
+  neediestAnimal(except = null, within = Infinity) {
+    let best = null;
+    let shortest = within;
+    for (const animal of this.animals) {
+      if (animal === except || !animal.isAlive()) continue;
+      if (Math.max(animal.drives.hunger, animal.drives.thirst) < 1) continue;
+      // The nearest of them, not the worst of them. Measured: worst-first sends
+      // him across the field past animals he could have saved on the way, and
+      // when several are going at once — which is how it happens here — the
+      // walk is the whole cost. Everything at this drive has a couple of
+      // hundred steps left, so the order to take them in is the order he can
+      // reach them in.
+      const away = except ? distance(except, animal) : 0;
+      if (away < shortest) {
+        shortest = away;
+        best = animal;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * One animal seeing to another: the farmer with a bucket, holding it while
+   * the beast drinks or eats from his hand.
+   *
+   * The Farm does it rather than the farmer, and that is not ceremony — an
+   * animal has no business reaching into another animal's drives, and only the
+   * farm is entitled to act on the pair. What comes back is what was actually
+   * taken, so the giver can pay for it out of his own stores.
+   * @returns {{ drive: string, given: number } | null} null if nothing was needed
+   */
+  nurse(patient, offered) {
+    const drive = patient.drives.thirst >= patient.drives.hunger ? "thirst" : "hunger";
+    const given = Math.min(offered, patient.drives[drive]);
+    if (given <= 0) return null;
+    patient.drives[drive] -= given;
+    return { drive, given };
   }
 
   /**

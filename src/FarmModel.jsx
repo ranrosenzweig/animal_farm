@@ -834,15 +834,13 @@ export default function FarmModel() {
                 {pen.emoji} {pen.species}
                 <span className="n">×{pen.count}</span>
               </button>
-              {!pen.Species.solitary && (
-                <button
-                  className="add"
-                  aria-label={`Add a ${pen.species.toLowerCase()}`}
-                  onClick={() => addAnimal(pen.species)}
-                >
-                  +
-                </button>
-              )}
+              <button
+                className="add"
+                aria-label={`Add a ${pen.species.toLowerCase()}`}
+                onClick={() => addAnimal(pen.species)}
+              >
+                +
+              </button>
             </div>
           ))}
         </div>
@@ -1369,7 +1367,12 @@ export default function FarmModel() {
             <div className="tile">
               <span className="lbl">Sown</span>
               <span className="big">{farmer.sown}</span>
-              <span className="sub">fresh sources, where a kind had run out altogether</span>
+              <span className="sub">troughs and patches opened, as the herd outgrew the last</span>
+            </div>
+            <div className="tile">
+              <span className="lbl">🧰 Seen to</span>
+              <span className="big">{farmer.nursed}</span>
+              <span className="sub">animals he dropped everything for, down at their last</span>
             </div>
           </div>
           <div className="fa-pair">
