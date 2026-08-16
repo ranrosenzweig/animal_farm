@@ -1,6 +1,7 @@
 import Animal from "../Animal.js";
 import { distance } from "../pasture.js";
 import { RESOURCE_KINDS } from "../Resource.js";
+import { clamp01 } from "../drives.js";
 
 /**
  * The farmer. He stands in the field on the same terms as everything else in
@@ -61,6 +62,15 @@ export default class Human extends Animal {
    */
   static yields = 0.25;
 
+  /**
+   * What he takes for himself each step — out of the same stores as the
+   * buckets, because a farmhouse has a kitchen and a well. It is why he does
+   * not queue at the trough behind six animals for the water he is carrying
+   * them: a farmer who dies of thirst on the third dry day is a farm that
+   * dies with him. An empty barn still starves him along with everyone else.
+   */
+  static provisions = 0.02;
+
   /** The yard below the barn, which is where he lives and where he ends his day. */
   static home = { x: 85, y: 34 };
 
@@ -91,6 +101,13 @@ export default class Human extends Animal {
     // Before the guard below, or a barn that ever reached empty would stay
     // empty however long the well ran.
     this.stores = Math.min(stores, this.stores + yields);
+
+    const { provisions } = this.constructor;
+    if (this.stores > 0) {
+      this.stores -= provisions;
+      this.drives.hunger = clamp01(this.drives.hunger - provisions);
+      this.drives.thirst = clamp01(this.drives.thirst - provisions);
+    }
 
     const { farm } = context;
     if (!farm || this.stores <= 0) return;

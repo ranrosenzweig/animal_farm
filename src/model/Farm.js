@@ -5,7 +5,7 @@ import { GOALS } from "./goals.js";
 import { OBSTACLES, standable } from "./terrain.js";
 import {
   CONTACT_SLOP, RELAXATIONS, STOPPED,
-  capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic,
+  capSpeed, collide, collideStatic, confine, containWithin, separate, separateStatic, slide,
 } from "./physics.js";
 import Resource, { DEEP, RESOURCE_KINDS, RESOURCE_NAMES, stockFloor } from "./Resource.js";
 import { OPENING, clockAt, clockStep, productivity } from "./clock.js";
@@ -542,11 +542,17 @@ export default class Farm {
       capSpeed(animal, animal.topSpeed);
     }
 
+    let stalledAt = Infinity;
     for (let pass = 0; pass < RELAXATIONS; pass++) {
       let deepest = 0;
+      let jammed = null;
       for (let i = 0; i < this.animals.length; i++) {
         for (let j = i + 1; j < this.animals.length; j++) {
-          deepest = Math.max(deepest, separate(this.animals[i], this.animals[j]));
+          const overlap = separate(this.animals[i], this.animals[j]);
+          if (overlap > deepest) {
+            deepest = overlap;
+            jammed = [this.animals[i], this.animals[j]];
+          }
         }
       }
       // The ground has the last word: whatever the bodies did to each other,
@@ -563,6 +569,14 @@ export default class Farm {
       // to the cap forever. Settling to well inside the slop rather than
       // merely to it is the margin that keeps `overlaps` honestly empty.
       if (deepest <= CONTACT_SLOP / 4) return pass + 1;
+
+      // A pass that changed nothing will not change anything next time either:
+      // the bodies are wedged in a gap narrower than they are, each held by a
+      // rock or the water on the very line the other is being pushed along, and
+      // the two moves cancel to the last decimal. Slide the worst pair sideways
+      // and let the passes carry on from there.
+      if (jammed && deepest >= stalledAt) slide(...jammed, deepest);
+      stalledAt = deepest;
     }
     return RELAXATIONS;
   }

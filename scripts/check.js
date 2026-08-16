@@ -20,13 +20,13 @@
 // them is the speed cap, which is the physical version of the same worry.
 import { seed } from "../src/model/random.js";
 import Farm from "../src/model/Farm.js";
-import { SPECIES, Human } from "../src/model/species.js";
+import { SPECIES, Human, speciesNamed } from "../src/model/species.js";
 import { PASTURE, inBounds } from "../src/model/pasture.js";
 import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.js";
 import { CONTACT_SLOP, GRAVITY, STOPPED, responseTime } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
-import Resource, { setHeldLevels } from "../src/model/Resource.js";
+import Resource, { DEEP, setHeldLevels } from "../src/model/Resource.js";
 
 // A different farm every run, but never an unrepeatable one. The check earns
 // its keep by exploring trajectories a fixed seed would never reach — it has
@@ -285,6 +285,44 @@ if (bare.size > 0) {
   }
 }
 
+// The squeeze: a gap narrower than the two animals in it.
+//
+// Bessie stands with her middle on the east pond's deep line and Nugget on the
+// rock at (55, 29), both on the line between rock and pond, with 9.1 units of
+// gap for 10 units of animal. Prising them apart along the line between their
+// centres pushes each straight into the thing behind it, which puts each
+// straight back: the overlap does not change by so much as a rounding error,
+// and 2000 passes leave the field exactly as they found it. This is the shape
+// of the round-114 jam from SEED=73 of the old stress run, laid out by hand
+// rather than replayed — seeds renumber whenever the model changes, and it is
+// the geometry that is the bug.
+const wedged = new Farm("Wedged", [], [new Resource("water", { x: 80, y: 25 })]);
+const rock = OBSTACLES[0];
+const pond = wedged.resources[0];
+const span = Math.hypot(pond.x - rock.x, pond.y - rock.y);
+const along = { x: (pond.x - rock.x) / span, y: (pond.y - rock.y) / span };
+for (const [name, species, from, out] of [
+  // Each one exactly touching its own barrier: the chicken's is the rock, and
+  // the cow's is the deep water, which the solver sees shrunk by her own radius.
+  ["Nugget", "Chicken", rock, rock.radius + 4.5],
+  ["Bessie", "Cow", pond, -pond.radius * DEEP],
+]) {
+  const animal = new (speciesNamed(species))(name);
+  animal.age = 1;   // grown, so the radii are the ones that made the jam
+  animal.moveTo({ x: from.x + along.x * out, y: from.y + along.y * out });
+  wedged.animals.push(animal);
+}
+const spent = wedged.resolve();
+const stuck = wedged.overlaps();
+if (stuck.length) {
+  const [a, b] = stuck[0];
+  fail(`squeeze: ${spent} passes and ${a.name} is still standing in ${b.name} — ` +
+    "prising along the line between them cannot solve a gap narrower than the pair");
+} else {
+  console.log(`Squeeze: a cow wedged between the water and a chicken on a rock ` +
+    `came apart in ${spent} passes.`);
+}
+
 // Held levels: the opposite of famine. What is held is the reading, not the
 // supply, so a held source pays a full mouthful whatever it says — even empty
 // — and never hides itself from the drink goal. The old bug served a mouthful
@@ -296,6 +334,12 @@ if (puddle.draw(1.1) !== 1.1) fail("held: an empty held pond served a short drin
 if (puddle.volume !== 0) fail(`held: the reading moved to ${puddle.volume}`);
 if (puddle.depleted) fail("held: an empty held pond hid itself from the drink goal");
 if (puddle.refill(50) !== 0 || puddle.volume !== 0) fail("held: a held pond took a top-up");
+// Width is not decoration: an animal drinks by standing in it, so a held pond
+// drawn as a puddle is a pond only the small animals can queue at.
+if (puddle.radius !== puddle.spec.spread) {
+  fail(`held: an empty held pond spreads ${puddle.radius.toFixed(2)}, not the full ` +
+    `${puddle.spec.spread} — too small for a cow to get her nose in beside a duck`);
+}
 
 // And end to end: a herd drinking and grazing for a long time must not move
 // the reading by a drop. Deliberately not asserted on who survives — holding

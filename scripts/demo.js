@@ -2,7 +2,7 @@
 //   node scripts/demo.js
 import Farm from "../src/model/Farm.js";
 import Animal from "../src/model/Animal.js";
-import { Cow, Duck, Pig, SPECIES } from "../src/model/species.js";
+import { Cow, Duck, Human, Pig, SPECIES } from "../src/model/species.js";
 import Resource from "../src/model/Resource.js";
 
 const at = (a) => `(${a.x.toFixed(0)}, ${a.y.toFixed(0)})`;
@@ -121,10 +121,13 @@ for (let round = 1; round <= 1200; round++) {
 }
 console.log(`  the pen now holds ${pen.size}: ${pen.animals.map((a) => a.describe().split(" — ")[0]).join(", ")}`);
 
-// Nothing grows back. A farm nobody tends drinks itself dry and dies.
-console.log("\nLeft alone with nothing in the field:");
+// Nothing grows back. A farm nobody tends drinks itself dry and dies — so the
+// farmer stays in his house for this one, or it would not be nobody tending it.
+console.log("\nLeft alone with nothing in the field, and no farmer:");
 let bare = new Farm("Bare");
-for (const Species of SPECIES) bare = bare.add(Species.random()).farm;
+for (const Species of SPECIES) {
+  if (Species !== Human) bare = bare.add(Species.random()).farm;
+}
 for (let round = 1; bare.size > 0 && round < 2000; round++) {
   const { farm: next, died } = bare.stepAll();
   bare = next;

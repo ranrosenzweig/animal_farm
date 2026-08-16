@@ -59,8 +59,30 @@ export const CONTACT_SLOP = 0.03;
  * far past comfort has to shuffle a whole crowd to make room. It is worth
  * being generous with, because the alternative to spending the passes is
  * leaving animals standing in one another.
+ *
+ * Measured, not guessed: over 40 stress runs of 200 rounds each, the three
+ * hungriest rounds wanted 836, 1027 and 1391 passes. This is six times the
+ * worst of those. A round that ever reaches it is a bug in the solver rather
+ * than a crowded field — the two that used to are `slide` and `OVERSHOOT`.
  */
-export const RELAXATIONS = 2000;
+export const RELAXATIONS = 8000;
+
+/**
+ * How much further than "just touching" each separating pass pushes a pair.
+ *
+ * Exactly apart is the obvious amount and it is the slow one. A crowd is a
+ * chain — prise one pair apart and the next pair has to be told, and the news
+ * travels one pass per link — so a packed field creeps towards a settled state
+ * by ever smaller steps. One deep round of the stress check took 24,256 passes
+ * to settle at exactly apart, and 207 at this. Overshooting a little sends the
+ * news along the chain ahead of the bodies.
+ *
+ * It is a dial, and it does not want turning up: nothing here is stable much
+ * above this, because a body pushed further than the overlap arrives past
+ * where it should have stopped and has to be pushed back. At 1.5 a round of
+ * the same check stopped settling at all.
+ */
+export const OVERSHOOT = 1.3;
 
 /**
  * Below this speed a body is standing still. Real ground grips: without a
@@ -195,12 +217,36 @@ export function separate(a, b) {
   const overlap = a.radius + b.radius - distance;
   if (overlap <= 0) return 0;
 
-  const give = overlap / 2;
+  const give = (overlap * OVERSHOOT) / 2;
   a.x -= nx * give;
   a.y -= ny * give;
   b.x += nx * give;
   b.y += ny * give;
   return overlap;
+}
+
+/**
+ * Slide two jammed bodies past one another, sideways.
+ *
+ * Prising apart along the line between two centres is exactly the wrong move
+ * when both are also pinned against something solid on that same line: a cow
+ * backed onto the water's edge with a chicken between her and a rock. The
+ * rocks put both straight back every pass, the overlap never changes by so
+ * much as a rounding error, and no number of passes will ever help, because
+ * the gap they are in is narrower than the two of them. The way out is the
+ * one direction nothing is holding: perpendicular to that line, where a
+ * crowded animal in a field shuffles along the obstacle rather than through
+ * it.
+ *
+ * @returns {number} how far each body was moved
+ */
+export function slide(a, b, by) {
+  const { x: nx, y: ny } = separation(a, b);
+  a.x += ny * by;
+  a.y -= nx * by;
+  b.x -= ny * by;
+  b.y += nx * by;
+  return by;
 }
 
 /**
