@@ -85,6 +85,7 @@ export default class Farm {
     // bounded by how far he can walk in one. Hire more from the pens above.
     const owner = new Human("Old MacDonald", "Farmer", 67);
     owner.sex = "male";   // Old MacDonald is a he; the hands are whoever turns up
+    owner.owns = true;    // and it is his farm, so the payroll is his to set
     return [owner, Human.random(), Human.random()]
       .reduce((farm, hand) => farm.add(hand).farm, stocked);
   }
@@ -744,8 +745,11 @@ export default class Farm {
     this.courtship(mover);
 
     const born = this.deliver();
+    const { hired, left } = this.employ();
     return {
-      farm: this.settled(born),
+      farm: this.settled([...born, ...hired], left),
+      hired,
+      left,
       moved: outcome === "moved",
       outcome,
       intention: { ...mover.intention },
@@ -787,8 +791,11 @@ export default class Farm {
     }
 
     const born = this.deliver();
+    const { hired, left } = this.employ();
     return {
-      farm: this.settled(born),
+      farm: this.settled([...born, ...hired], left),
+      hired,
+      left,
       moved,
       born,
       died: this.animals.filter((a) => !a.isAlive()),
@@ -843,15 +850,55 @@ export default class Farm {
    * advances — and the only place the weather gets to fall on the field.
    * @private
    */
-  settled(born = []) {
+  settled(born = [], gone = []) {
     this.water();
     this.keepStocked();
     return new Farm(
       this.name,
-      [...this.animals.filter((a) => a.isAlive()), ...born],
+      [...this.animals.filter((a) => a.isAlive() && !gone.includes(a)), ...born],
       this.resources.filter((r) => !r.depleted),
       this.steps + clockStep(),
     );
+  }
+
+  /**
+   * The owner sizing his workforce to the herd: a hand taken on when there is
+   * more stock than the men he has can keep, and one paid off when there is
+   * less. Only the Farm can do the placing and the removing, so he says how
+   * many he wants and this settles it — the same division as everywhere else
+   * here, where an animal decides and the farm arbitrates.
+   *
+   * At most one change at a time and never twice in a hurry: a herd sitting on
+   * the boundary would otherwise have him hiring and firing the same man every
+   * other step.
+   * @returns {{ hired: Human[], left: Human[] }}
+   * @private
+   */
+  employ() {
+    const nobody = { hired: [], left: [] };
+    const owner = this.animals.find((a) => a.owns && a.isAlive());
+    if (!owner || owner.settling > 0) return nobody;
+
+    const men = this.animals.filter((a) => a instanceof Human && a.isAlive());
+    const wanted = owner.wantedHands(this);
+    if (men.length < wanted) {
+      const hand = Human.random();
+      const spot = this.freeSpotFor(hand);
+      if (!spot) return nobody;   // a full pasture hires nobody
+      hand.name = this.unusedName(hand.name);
+      hand.moveTo(spot);
+      owner.settling = Human.settles;
+      return { hired: [hand], left: [] };
+    }
+    if (men.length > wanted) {
+      // The last one taken on is the first one paid off, and never the owner:
+      // it is his farm, and he is the one who cannot be spared.
+      const spare = men.filter((a) => !a.owns).at(-1);
+      if (!spare) return nobody;
+      owner.settling = Human.settles;
+      return { hired: [], left: [spare] };
+    }
+    return nobody;
   }
 
   /**
