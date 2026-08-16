@@ -86,6 +86,7 @@ export default class Farm {
     const owner = new Human("Old MacDonald", "Farmer", 67);
     owner.sex = "male";   // Old MacDonald is a he; the hands are whoever turns up
     owner.owns = true;    // and it is his farm, so the payroll is his to set
+    owner.purse = Human.capital;
     return [owner, Human.random(), Human.random()]
       .reduce((farm, hand) => farm.add(hand).farm, stocked);
   }
@@ -745,11 +746,13 @@ export default class Farm {
     this.courtship(mover);
 
     const born = this.deliver();
+    const wages = this.payday();
     const { hired, left } = this.employ();
     return {
       farm: this.settled([...born, ...hired], left),
       hired,
       left,
+      wages,
       moved: outcome === "moved",
       outcome,
       intention: { ...mover.intention },
@@ -791,11 +794,13 @@ export default class Farm {
     }
 
     const born = this.deliver();
+    const wages = this.payday();
     const { hired, left } = this.employ();
     return {
       farm: this.settled([...born, ...hired], left),
       hired,
       left,
+      wages,
       moved,
       born,
       died: this.animals.filter((a) => !a.isAlive()),
@@ -859,6 +864,41 @@ export default class Farm {
       this.resources.filter((r) => !r.depleted),
       this.steps + clockStep(),
     );
+  }
+
+  /**
+   * Market day, once a day: the pails go to town and the men get paid.
+   *
+   * The Farm gathers what the animals have made, because the animals are its
+   * to gather from — the same `collect` the farmer's own button calls, so
+   * anything he took by hand this morning is already gone and is not sold
+   * twice. What it fetches and what the men are owed are the owner's arithmetic.
+   * @returns {{ earned, due, paid, short, got } | null} null on any other day
+   * @private
+   */
+  payday() {
+    const owner = this.animals.find((a) => a.owns && a.isAlive());
+    if (!owner) return null;
+    const today = this.clock.day;
+    if (owner.lastMarket === today) return null;
+    // Not on the opening round: the pails are empty and nobody has worked yet.
+    if (owner.lastMarket === null) {
+      owner.lastMarket = today;
+      return null;
+    }
+    owner.lastMarket = today;
+
+    const totals = new Map();
+    for (const animal of this.animals) {
+      const got = animal.collect();
+      if (!got) continue;
+      const running = totals.get(got.label);
+      if (running) running.amount += got.amount;
+      else totals.set(got.label, { ...got });
+    }
+    const got = [...totals.values()];
+    const hands = this.animals.filter((a) => a instanceof Human && a.isAlive() && !a.owns).length;
+    return { ...owner.market(got, hands), got };
   }
 
   /**

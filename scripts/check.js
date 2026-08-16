@@ -334,22 +334,45 @@ if (bare.size > 0) {
   let hired = 0;
   let paid = 0;
   let born = 0;
+  let markets = 0;
+  let earned = 0;
+  let wages = 0;
   for (let round = 1; round <= 3000; round++) {
     const turn = steading.stepAll();
     steading = turn.farm;
     hired += turn.hired.length;
     paid += turn.left.length;
     born += turn.born.length;
+    if (turn.wages) {
+      markets += 1;
+      earned += turn.wages.earned;
+      wages += turn.wages.paid;
+      // He pays what he has and no more. An overdraft here would mean the farm
+      // could run a payroll it never earned, which is the one thing money is
+      // in the model to prevent.
+      if (owner.purse < 0) {
+        fail(`wages: the tin is at ${Math.round(owner.purse)} on round ${round} — he has paid out money he did not have`);
+        break;
+      }
+      if (turn.wages.paid > turn.wages.due + 1e-9) {
+        fail(`wages: paid ${turn.wages.paid} against ${turn.wages.due} due on round ${round}`);
+        break;
+      }
+    }
   }
 
   const men = steading.animals.filter((a) => a instanceof Human);
   const herd = steading.size - men.length;
-  const wanted = owner.wantedHands(steading);
   if (!owner.isAlive() || !steading.animals.includes(owner)) {
     fail("payroll: Old MacDonald is not on his own farm at the end of it");
-  } else if (Math.abs(men.length - wanted) > 1) {
-    fail(`payroll: ${herd} head and ${men.length} men, when he wants ${wanted} — ` +
-      "the payroll is not following the herd");
+  } else if (men.length > Math.max(1, Math.ceil(herd / Human.perHand)) + 1) {
+    // Never more men than the stock wants. Not the other way about: he lets
+    // one go at a time and no oftener than every four hundred steps, and a
+    // thin purse can want fewer than the herd does, so being short-handed at
+    // any given moment is the rule working rather than failing.
+    fail(`payroll: ${men.length} men on ${herd} head, which is more than the herd asks for`);
+  } else if (men.length < 1) {
+    fail("payroll: nobody is left on the farm at all");
   } else if (men.some((a) => a.owns && a !== owner)) {
     fail("payroll: somebody else is claiming to own the farm");
   } else if (born === 0) {
@@ -359,9 +382,15 @@ if (bare.size > 0) {
     // own variance, and two seeds in five end a head or two down. What must not
     // happen is the herd collapsing while a farm full of men watches.
     fail(`payroll: the herd is down to ${herd} of the twelve it opened with, with ${men.length} men on it`);
+  } else if (markets < 20) {
+    fail(`payroll: only ${markets} market days in 3000 rounds — the milk is not being sold`);
+  } else if (!(earned > 0)) {
+    fail("payroll: the farm went to market and came back with nothing, every time");
   } else {
     console.log(`Payroll: 12 head are ${herd} after 3000 rounds and ${born} births, and the payroll ` +
       `followed — ${hired} hired, ${paid} paid off, ${men.length} men at the end.`);
+    console.log(`Wages: ${markets} market days took ${Math.round(earned)} and paid ${Math.round(wages)} ` +
+      `of it out again, leaving ${Math.round(owner.purse)} in the tin.`);
   }
 }
 
