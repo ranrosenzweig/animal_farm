@@ -104,9 +104,16 @@ export default class Resource {
   /**
    * How far it spreads. Area scales with what's left, so a drained pond is a
    * puddle — but never quite nothing, so the last drop is still reachable.
+   *
+   * A held source spreads as a full one, for the same reason it serves a full
+   * mouthful: what is held is the reading, not the supply. This is not
+   * decoration. Standing in it is how an animal drinks, so the width of a
+   * source is the width of the queue at it — and a puddle with a duck and a
+   * chicken in it has no room left for a cow's body. Held low without this,
+   * the big animals never get a drink again as long as the farm stands.
    */
   get radius() {
-    return this.spec.spread * Math.max(0.35, Math.sqrt(this.fullness));
+    return this.spec.spread * Math.max(0.35, Math.sqrt(held ? 1 : this.fullness));
   }
 
   /**
