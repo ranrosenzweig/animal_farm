@@ -40,6 +40,26 @@ const GOAL_ICONS = {
 
 const SEX_MARKS = { female: "♀", male: "♂" };
 
+/**
+ * Market day, in words: what went to town, what it fetched, and what was left
+ * after the men were paid. A farm that cannot make its wages says so, because
+ * that is the line that explains the hand who leaves a moment later.
+ */
+function marketNotice({ got, earned, due, paid, short }) {
+  const load = got.filter((g) => g.amount >= 0.1)
+    // Eggs are counted rather than measured, so they carry no unit and must not
+    // be given one: "1.6 × eggs" is not a thing anybody says.
+    .map((g) => `${Math.round(g.amount * 10) / 10}${g.unit ? ` ${g.unit}` : ""} ${g.label.toLowerCase()}`)
+    .join(" and ");
+  const sold = load ? `${load} away for ${Math.round(earned)}` : "nothing to take to market";
+  if (due === 0) return `Market day: ${sold}, and nobody on the payroll.`;
+  if (short > 0) {
+    return `Market day: ${sold} — ${Math.round(paid)} of ${Math.round(due)} in wages, ` +
+      `${Math.round(short)} short.`;
+  }
+  return `Market day: ${sold}, ${Math.round(due)} of it straight out again in wages.`;
+}
+
 /** How the hour and the weather read on screen. Presentation only. */
 const PHASE_MARKS = { dawn: "🌅", day: "🌞", dusk: "🌇", night: "🌙" };
 const SKY_MARKS = { rain: "🌧", snow: "❄️", clear: "☀️" };
@@ -511,6 +531,8 @@ export default function FarmModel() {
      record keeps running totals, so a day's work is the step up from the day
      before — and the first recorded day has nothing before it to subtract. */
   const farmer = farm.animals.find((a) => a instanceof Human);
+  const owner = farm.animals.find((a) => a.owns) ?? farmer;
+  const hands = farm.animals.filter((a) => a instanceof Human && !a.owns).length;
   const carriedRows = recorded.slice(1).map((r, i) => {
     const before = recorded[i];
     const day = RESOURCE_NAMES.map((kind) => ({
@@ -598,8 +620,9 @@ export default function FarmModel() {
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
-      const { farm: next, died, dried, born, contests, chores, hired, left } = farmRef.current.stepAll();
+      const { farm: next, died, dried, born, contests, chores, hired, left, wages } = farmRef.current.stepAll();
       setFarm(next);
+      if (wages) pushLog(marketNotice(wages), "info", "Human");
       for (const hand of hired) {
         pushLog(`${hand.name} is taken on as a farmhand.`, "info", hand.species);
       }
@@ -1360,6 +1383,13 @@ export default function FarmModel() {
             </span>
           </div>
           <div className="fa-tiles">
+            <div className="tile">
+              <span className="lbl">💰 In the tin</span>
+              <span className="big">{Math.round(owner ? owner.purse : 0)}</span>
+              <span className="sub">
+                {hands} on the payroll at {Human.wage} a day · milk {Human.prices.Milk}/L, eggs {Human.prices.Eggs}
+              </span>
+            </div>
             <div className="tile">
               <span className="lbl">In the barn</span>
               <span className="big">{Math.round(farmer.stores)}</span>

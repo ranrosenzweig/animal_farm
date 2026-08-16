@@ -121,6 +121,32 @@ export default class Human extends Animal {
   static perHand = 4;
 
   /**
+   * What the farm's produce fetches, per unit, and what a hand costs for a
+   * day's work.
+   *
+   * Swept rather than guessed, over four farms of four thousand rounds. A hand
+   * at 25 a day against these prices bankrupts three farms in four: the purse
+   * empties, the men go, the herd dies for want of them and takes the milk
+   * with it, which is a spiral rather than a difficulty. A hand at 10 is the
+   * other failure — nobody ever comes close to missing a wage and the money
+   * is decorative. This pair leaves a dozen head about 165 a day against 30
+   * for two hands, and still misses a payday now and then in a bad winter,
+   * which is what a working farm feels like.
+   */
+  static prices = { Milk: 3, Eggs: 5, Wool: 8 };
+
+  static wage = 15;
+
+  /** What Old MacDonald has in the tin the day the farm opens. */
+  static capital = 300;
+
+  /**
+   * Days of wages he wants in hand before he will take another man on. Nobody
+   * hires a hand he can only pay until Thursday.
+   */
+  static reserve = 2;
+
+  /**
    * Steps before the owner will change his mind about the payroll again. A
    * herd sitting on the boundary would otherwise have him taking a man on and
    * paying him off on alternate steps.
@@ -151,6 +177,10 @@ export default class Human extends Animal {
     this.tool = null;
     /** True for the one whose farm it is. He hires, and he never leaves. */
     this.owns = false;
+    /** What is in the tin. Only the owner's ever holds anything. */
+    this.purse = 0;
+    /** The day he last took the milk to market, so payday comes round once. */
+    this.lastMarket = null;
     /** Steps before he will change the payroll again. */
     this.settling = 0;
     /**
@@ -381,8 +411,32 @@ export default class Human extends Animal {
    * hand is hired for a season rather than for an afternoon.
    */
   wantedHands(farm) {
+    const { perHand, wage, reserve } = this.constructor;
     const head = farm.animals.filter((a) => !(a instanceof Human) && a.isAlive()).length;
-    return Math.max(1, Math.ceil(head / this.constructor.perHand));
+    const forTheHerd = Math.max(1, Math.ceil(head / perHand));
+    // And what he can pay for. Hands are not free, so the herd asking for a man
+    // is only half of it — the other half is whether there is anything in the
+    // tin to pay him with, which is what the milk is for.
+    const afford = Math.max(1, Math.floor(this.purse / (wage * reserve)));
+    return Math.min(forTheHerd, afford);
+  }
+
+  /**
+   * Market day: what the farm made, sold, and what the men are owed for it.
+   *
+   * The Farm gathers the produce, because it is the farm that has the animals;
+   * the prices and the payroll are his. What he cannot pay he owes, and a man
+   * he cannot pay is a man he will not keep — `wantedHands` reads the same
+   * purse this leaves behind.
+   * @returns {{ earned: number, due: number, paid: number, short: number }}
+   */
+  market(got, hands) {
+    const { prices, wage } = this.constructor;
+    const earned = got.reduce((total, g) => total + (prices[g.label] ?? 0) * g.amount, 0);
+    const due = hands * wage;
+    const paid = Math.min(this.purse + earned, due);
+    this.purse = this.purse + earned - paid;
+    return { earned, due, paid, short: due - paid };
   }
 
   /** With nothing that needs doing, he heads back to the house. */
