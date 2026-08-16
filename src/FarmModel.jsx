@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Farm from "./model/Farm.js";
-import { SPECIES, speciesNamed } from "./model/species.js";
+import { Human, SPECIES, speciesNamed } from "./model/species.js";
 import { centroid, clampToPasture } from "./model/pasture.js";
 import { PATCHES, RELIEF } from "./model/terrain.js";
 import { STOPPED } from "./model/physics.js";
@@ -35,7 +35,7 @@ const LEG_LINE = {
 
 /** How each goal reads on screen. Presentation only — the model has no icons. */
 const GOAL_ICONS = {
-  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️", tend: "🪣",
+  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️", tend: "🧰",
 };
 
 const SEX_MARKS = { female: "♀", male: "♂" };
@@ -477,6 +477,10 @@ export default function FarmModel() {
         counts: Object.fromEntries(farm.census().map((pen) => [pen.species, pen.count])),
         head: farm.size,
         stock: Object.fromEntries(farm.stock().map((s) => [s.kind, s.volume])),
+        // A running total rather than the day's own figure: what he put down on
+        // any one day is the step up from the day before, and a total survives
+        // a farmer who dies and a day nobody watched.
+        carried: { ...(farm.animals.find((a) => a instanceof Human)?.carried ?? {}) },
       },
     ];
   }, [farm]);
@@ -502,6 +506,29 @@ export default function FarmModel() {
   const stockMax = Object.fromEntries(stock.map((s) => [
     s.kind, Math.max(1, ...recorded.map((r) => r.stock[s.kind] ?? 0)),
   ]));
+
+  /* The farmer, and the day-by-day of what he carried out to the field. The
+     record keeps running totals, so a day's work is the step up from the day
+     before — and the first recorded day has nothing before it to subtract. */
+  const farmer = farm.animals.find((a) => a instanceof Human);
+  const carriedRows = recorded.slice(1).map((r, i) => {
+    const before = recorded[i];
+    const day = RESOURCE_NAMES.map((kind) => ({
+      kind,
+      value: Math.max(0, (r.carried[kind] ?? 0) - (before.carried[kind] ?? 0)),
+    }));
+    const put = day.filter((d) => d.value >= 1);
+    return {
+      key: r.day,
+      title: `Day ${r.day}: ${put.length
+        ? put.map((d) => `${Math.round(d.value)} ${RESOURCE_KINDS[d.kind].unit} of ${d.kind}`).join(" and ")
+        : "nothing needed carrying"}`,
+      parts: day
+        .map((d) => ({ key: d.kind, value: d.value, color: SERIES[d.kind === "water" ? 0 : 5] }))
+        .filter((part) => part.value > 0),
+    };
+  });
+  const carriedMax = Math.max(1, ...carriedRows.map((r) => r.parts.reduce((t, p) => t + p.value, 0)));
   const warmest = Math.max(...year.map((d) => d.tempC));
   const coldest = Math.min(...year.map((d) => d.tempC));
   const wettest = Math.max(1, ...year.map((d) => d.wetHours));
@@ -571,9 +598,10 @@ export default function FarmModel() {
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
-      const { farm: next, died, dried, born, contests } = farmRef.current.stepAll();
+      const { farm: next, died, dried, born, contests, chores } = farmRef.current.stepAll();
       setFarm(next);
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
+      for (const c of chores) pushLog(c.notice, "tend", c.by.species);
       for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
       for (const baby of born) pushLog(baby.birthNotice(), "born", baby.species);
       for (const animal of died) pushLog(animal.epitaph(), "died", animal.species);
@@ -620,13 +648,14 @@ export default function FarmModel() {
    * farm decides where — or whether — it can go.
    */
   function walk(animal) {
-    const { farm: next, outcome, died, born, contests } = farm.step(animal.id);
+    const { farm: next, outcome, died, born, contests, chores } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move", animal.species);
     } else {
       pushLog(animal.narrate(), animal.goal, animal.species);
     }
+    for (const c of chores) pushLog(c.notice, "tend", c.by.species);
     for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
     for (const baby of born) pushLog(baby.birthNotice(), "born", baby.species);
     for (const lost of died) pushLog(lost.epitaph(), "died", lost.species);
@@ -1080,7 +1109,10 @@ export default function FarmModel() {
                 // or through mud swings them slower, because it is the same
                 // legs covering less ground.
                 "--stride": `${Math.round(Math.min(1400, (stepMs * 1.6 * a.stepSize) / Math.max(a.speed, 0.2)))}ms`,
-                "--legline": `${LEG_LINE[a.species] ?? 0.24}em`,
+                // Nothing to crop off something that has no legs to redraw:
+                // the farmer on his tractor is a tractor, and a tractor's
+                // wheels are the ones it came with.
+                "--legline": `${a.legs === 0 ? 0 : LEG_LINE[a.species] ?? 0.24}em`,
               }}
               onClick={(event) => {
                 // While placing, let the click through to the pasture beneath.
@@ -1305,6 +1337,53 @@ export default function FarmModel() {
             </div>
           ))}
         </div>
+
+        {/* What the farm has of its farmer. Every figure here is his own
+            running tally, so it reads the same whether you have watched him
+            all year or just walked in. */}
+        {farmer && (
+        <div className="fa-card">
+          <div className="fa-card-title">
+            {/* The man, not whatever he is driving: his sprite out in the
+                field is the tractor, and a card headed by one reads as a
+                machine's page rather than his. */}
+            {Human.emoji} {farmer.name}
+            <span className="note">
+              {farmer.goal === "tend" && farmer.tool ? `out with the ${farmer.tool}`
+                : `${GOAL_ICONS[farmer.goal] ?? ""} ${farmer.goal}`}
+            </span>
+          </div>
+          <div className="fa-tiles">
+            <div className="tile">
+              <span className="lbl">In the barn</span>
+              <span className="big">{Math.round(farmer.stores)}</span>
+              <span className="sub">of {Human.stores} · the well draws it back at {Human.yields}/step</span>
+            </div>
+            {stock.map((s) => (
+              <div className="tile" key={s.kind}>
+                <span className="lbl">{RESOURCE_ICONS[s.kind]} {s.label} carried</span>
+                <span className="big">{Math.round(farmer.carried[s.kind] ?? 0)} {s.unit}</span>
+                <span className="sub">out of the barn and into the field</span>
+              </div>
+            ))}
+            <div className="tile">
+              <span className="lbl">Sown</span>
+              <span className="big">{farmer.sown}</span>
+              <span className="sub">fresh sources, where a kind had run out altogether</span>
+            </div>
+          </div>
+          <div className="fa-pair">
+            <span className="side">🧰 Carried out<b>{carriedMax} a day</b></span>
+            <Columns
+              rows={carriedRows}
+              max={carriedMax}
+              height={54}
+              label={`What ${farmer.name} carried out to the field on each of the last ${carriedRows.length} days, water and grass stacked, up to ${carriedMax} in a day.`}
+              empty="nothing carried yet — let them roam through a night"
+            />
+          </div>
+        </div>
+        )}
 
         <div className="fa-card">
           <div className="fa-card-title">

@@ -34,6 +34,16 @@ let held = false;
 export const heldLevels = () => held;
 
 export const setHeldLevels = (on) => { held = Boolean(on); };
+/**
+ * The level below which a source counts as needing the farmer. A trough two
+ * fifths gone is a chore; one barely touched is not.
+ *
+ * One number rather than two, because the errand and the line in the log that
+ * says he finished it have to agree about what finished means — otherwise he
+ * walks away from a source the log still thinks he is filling.
+ */
+export const ENOUGH = 0.6;
+
 export const RESOURCE_KINDS = {
   water: {
     kind: "water",

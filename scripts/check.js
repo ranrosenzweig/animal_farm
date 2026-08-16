@@ -26,7 +26,7 @@ import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.j
 import { CONTACT_SLOP, GRAVITY, STOPPED, responseTime } from "../src/model/physics.js";
 import { GOAL_NAMES } from "../src/model/goals.js";
 import { DRIVES } from "../src/model/drives.js";
-import Resource, { DEEP, setHeldLevels } from "../src/model/Resource.js";
+import Resource, { DEEP, ENOUGH, setHeldLevels } from "../src/model/Resource.js";
 
 // A different farm every run, but never an unrepeatable one. The check earns
 // its keep by exploring trajectories a fixed seed would never reach — it has
@@ -282,6 +282,41 @@ if (bare.size > 0) {
     console.log(`Tending: 600 rounds on a field that started bare — ${herd} of ${SPECIES.length - 1} still ` +
       `alive, ${Math.round(farmer.stores)} of ${Human.stores} left in the barn, ` +
       `field holding ${kept.stock().map((s) => `${s.volume} ${s.unit} of ${s.kind}`).join(" and ")}.`);
+  }
+}
+
+// The implements: grass is cut and carted, water is piped, and both live at the
+// house. One farmer, one low pond, one bare patch and nothing drinking, so
+// every drop that moves here is his — and he cannot move both without walking
+// home in between, which is the constraint being measured. He has to finish the
+// pair.
+{
+  let shed = new Farm("Implements", [], [
+    new Resource("water", { x: 17, y: 68 }, { name: "Pond", volume: 10 }),
+    new Resource("grass", { x: 34, y: 30 }, { name: "Meadow", volume: 6 }),
+  ]);
+  shed = shed.add(Human.random()).farm;
+  const hand = shed.animals[0];
+  // Long enough for both jobs with a night's sleep in the middle of them and
+  // room to spare: he sleeps through half of any stretch of rounds, and where
+  // he happens to start costs him a walk either way.
+  for (let round = 1; round <= 900; round++) shed = shed.stepAll().farm;
+
+  const short = shed.resources.filter((r) => r.fullness < ENOUGH);
+  for (const kind of ["water", "grass"]) {
+    if (!(hand.carried[kind] > 0)) {
+      fail(`implements: 900 rounds and he never put any ${kind} down — ` +
+        `he is holding the ${hand.tool ?? "nothing"}, so the other job never got its turn`);
+    }
+  }
+  for (const r of short) {
+    fail(`implements: ${r.name} is still at ${Math.round(r.volume)} of ${r.capacity} — ` +
+      "he left a job unfinished");
+  }
+  if (failures === 0) {
+    console.log(`Implements: alone with a low pond and a bare patch, he fetched both — ` +
+      `${Math.round(hand.carried.water)} L by hose and ${Math.round(hand.carried.grass)} kg by tractor, ` +
+      `leaving ${shed.resources.map((r) => `${r.name} at ${Math.round(r.fullness * 100)}%`).join(" and ")}.`);
   }
 }
 
