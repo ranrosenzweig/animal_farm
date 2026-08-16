@@ -784,13 +784,15 @@ export default function FarmModel() {
                 {pen.emoji} {pen.species}
                 <span className="n">×{pen.count}</span>
               </button>
-              <button
-                className="add"
-                aria-label={`Add a ${pen.species.toLowerCase()}`}
-                onClick={() => addAnimal(pen.species)}
-              >
-                +
-              </button>
+              {!pen.Species.solitary && (
+                <button
+                  className="add"
+                  aria-label={`Add a ${pen.species.toLowerCase()}`}
+                  onClick={() => addAnimal(pen.species)}
+                >
+                  +
+                </button>
+              )}
             </div>
           ))}
         </div>
