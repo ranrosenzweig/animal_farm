@@ -16,7 +16,7 @@ export default class Duck extends Animal {
   static swims = true;     // the one thing here that crosses a pond rather than skirting it
 
   // Never far from water, and thirsty long before it is hungry.
-  static affinities = { drink: 1.0, graze: 0.6, flock: 0.5, rest: 0.4, wallow: 0, roam: 0.5, mate: 0.6 };
+  static affinities = { drink: 1.0, graze: 0.6, flock: 0.5, rest: 0.4, wallow: 0, roam: 0.5, mate: 0.6, tend: 0 };
   static driveRates = { hunger: 0.004, thirst: 0.009, fatigue: 0.003, loneliness: 0.005, urge: 0.004 };
   static intake = 0.4;
 

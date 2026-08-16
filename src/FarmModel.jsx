@@ -30,12 +30,12 @@ import "./farm.css";
  * re-checking — which is what a per-species number is for.
  */
 const LEG_LINE = {
-  Cow: 0.3, Horse: 0.3, Sheep: 0.24, Pig: 0.22, Chicken: 0.28, Duck: 0.2,
+  Cow: 0.3, Horse: 0.3, Sheep: 0.24, Pig: 0.22, Chicken: 0.28, Duck: 0.2, Human: 0.32,
 };
 
 /** How each goal reads on screen. Presentation only — the model has no icons. */
 const GOAL_ICONS = {
-  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️",
+  graze: "🌿", drink: "💧", wallow: "🫧", flock: "👥", rest: "😴", roam: "🚶", mate: "❤️", tend: "🪣",
 };
 
 const SEX_MARKS = { female: "♀", male: "♂" };

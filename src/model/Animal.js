@@ -83,7 +83,7 @@ export default class Animal {
    * what makes a duck make for the pond and a pig for the mud.
    */
   static affinities = {
-    graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4, mate: 0.7,
+    graze: 0.8, drink: 0.6, wallow: 0, flock: 0.4, rest: 0.5, roam: 0.4, mate: 0.7, tend: 0,
   };
 
   /**
