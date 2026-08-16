@@ -598,8 +598,14 @@ export default function FarmModel() {
   useEffect(() => {
     if (!roaming) return undefined;
     const timer = window.setInterval(() => {
-      const { farm: next, died, dried, born, contests, chores } = farmRef.current.stepAll();
+      const { farm: next, died, dried, born, contests, chores, hired, left } = farmRef.current.stepAll();
       setFarm(next);
+      for (const hand of hired) {
+        pushLog(`${hand.name} is taken on as a farmhand.`, "info", hand.species);
+      }
+      for (const hand of left) {
+        pushLog(`${hand.name} is paid off; there is not the work for them.`, "info", hand.species);
+      }
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
       for (const c of chores) pushLog(c.notice, "tend", c.by.species);
       for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
@@ -648,13 +654,15 @@ export default function FarmModel() {
    * farm decides where — or whether — it can go.
    */
   function walk(animal) {
-    const { farm: next, outcome, died, born, contests, chores } = farm.step(animal.id);
+    const { farm: next, outcome, died, born, contests, chores, hired, left } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move", animal.species);
     } else {
       pushLog(animal.narrate(), animal.goal, animal.species);
     }
+    for (const hand of hired) pushLog(`${hand.name} is taken on as a farmhand.`, "info", hand.species);
+    for (const hand of left) pushLog(`${hand.name} is paid off.`, "info", hand.species);
     for (const c of chores) pushLog(c.notice, "tend", c.by.species);
     for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
     for (const baby of born) pushLog(baby.birthNotice(), "born", baby.species);

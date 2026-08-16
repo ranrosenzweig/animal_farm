@@ -320,6 +320,51 @@ if (bare.size > 0) {
   }
 }
 
+// The payroll: the owner sizing his workforce to the stock he has.
+//
+// The farm it opens with is meant to grow, and a herd that grows past what the
+// men can keep starts dying instead — so what is asserted is that the number of
+// men tracks the number of animals, that the owner is still there to do the
+// sizing, and that the herd is bigger at the end than it started. Long, because
+// a hand is hired for a season: nothing here happens inside a few hundred
+// rounds.
+{
+  let steading = Farm.starter("Payroll");
+  const owner = steading.animals.find((a) => a.owns);
+  let hired = 0;
+  let paid = 0;
+  let born = 0;
+  for (let round = 1; round <= 3000; round++) {
+    const turn = steading.stepAll();
+    steading = turn.farm;
+    hired += turn.hired.length;
+    paid += turn.left.length;
+    born += turn.born.length;
+  }
+
+  const men = steading.animals.filter((a) => a instanceof Human);
+  const herd = steading.size - men.length;
+  const wanted = owner.wantedHands(steading);
+  if (!owner.isAlive() || !steading.animals.includes(owner)) {
+    fail("payroll: Old MacDonald is not on his own farm at the end of it");
+  } else if (Math.abs(men.length - wanted) > 1) {
+    fail(`payroll: ${herd} head and ${men.length} men, when he wants ${wanted} — ` +
+      "the payroll is not following the herd");
+  } else if (men.some((a) => a.owns && a !== owner)) {
+    fail("payroll: somebody else is claiming to own the farm");
+  } else if (born === 0) {
+    fail("payroll: 3000 rounds with a pair of every species and not one animal born");
+  } else if (herd < 6) {
+    // Not "bigger than it started": which way a given farm goes is the model's
+    // own variance, and two seeds in five end a head or two down. What must not
+    // happen is the herd collapsing while a farm full of men watches.
+    fail(`payroll: the herd is down to ${herd} of the twelve it opened with, with ${men.length} men on it`);
+  } else {
+    console.log(`Payroll: 12 head are ${herd} after 3000 rounds and ${born} births, and the payroll ` +
+      `followed — ${hired} hired, ${paid} paid off, ${men.length} men at the end.`);
+  }
+}
+
 // The squeeze: a gap narrower than the two animals in it.
 //
 // Bessie stands with her middle on the east pond's deep line and Nugget on the

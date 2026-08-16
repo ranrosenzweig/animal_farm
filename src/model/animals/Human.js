@@ -111,6 +111,22 @@ export default class Human extends Animal {
    */
   static provisions = 0.02;
 
+  /**
+   * How much stock one pair of hands can keep. Straight off the measurement:
+   * over four farms of a dozen head, one man leaves seven, five, five and two
+   * alive, two men leave nine to fifteen, and three leave eleven to twenty. A
+   * hand to every four head is the far side of that curve, where the herd
+   * grows instead of dwindling.
+   */
+  static perHand = 4;
+
+  /**
+   * Steps before the owner will change his mind about the payroll again. A
+   * herd sitting on the boundary would otherwise have him taking a man on and
+   * paying him off on alternate steps.
+   */
+  static settles = 400;
+
   /** The yard below the barn, which is where he lives and where he ends his day. */
   static home = { x: 85, y: 34 };
 
@@ -133,6 +149,10 @@ export default class Human extends Animal {
     this.filling = null;
     /** The implement in his hands: "tractor", "hose", or nothing yet. */
     this.tool = null;
+    /** True for the one whose farm it is. He hires, and he never leaves. */
+    this.owns = false;
+    /** Steps before he will change the payroll again. */
+    this.settling = 0;
     /**
      * What he finished doing this step, for whoever is keeping the log — a
      * chore worth a line, not the pouring itself. Null on every step where he
@@ -155,6 +175,7 @@ export default class Human extends Animal {
   feel(context = {}) {
     super.feel(context);
     this.chore = null;
+    if (this.settling > 0) this.settling -= 1;
     const { yields, stores } = this.constructor;
     // Before the guard below, or a barn that ever reached empty would stay
     // empty however long the well ran.
@@ -352,6 +373,16 @@ export default class Human extends Animal {
   pressureFor(goalName, context = {}) {
     if (goalName === "tend" && context.farm?.neediestAnimal(this, this.constructor.reaches)) return 1;
     return super.pressureFor(goalName, context);
+  }
+
+  /**
+   * How many men this herd wants, the owner's own arithmetic. He counts stock
+   * rather than chores because that is what he can see from the gate, and a
+   * hand is hired for a season rather than for an afternoon.
+   */
+  wantedHands(farm) {
+    const head = farm.animals.filter((a) => !(a instanceof Human) && a.isAlive()).length;
+    return Math.max(1, Math.ceil(head / this.constructor.perHand));
   }
 
   /** With nothing that needs doing, he heads back to the house. */
