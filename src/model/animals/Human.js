@@ -36,6 +36,7 @@ export default class Human extends Animal {
   static radius = 4.5;
   static legs = 2;
   static turnRate = 0.5;
+  static solitary = true;  // there is one farmer, and this is him
 
   // The chores come first, and nothing else here does them. He does not breed
   // — that is not what he is on the field for — and he is far too dignified to

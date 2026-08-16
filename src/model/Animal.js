@@ -101,6 +101,13 @@ export default class Animal {
   static legs = 4;
 
   /**
+   * @type {boolean} Whether there is only ever the one of this kind. A pen you
+   * can stock is the normal case; the farm has one owner, and the UI leaves the
+   * + off his pen rather than offering you a second Old MacDonald.
+   */
+  static solitary = false;
+
+  /**
    * @type {boolean} Whether deep water is ground to this kind. Almost nothing
    * on a farm can cross a pond, so the default is to be stopped by one exactly
    * as by a rock — a cow walks round the water it drinks from.
