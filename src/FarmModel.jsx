@@ -400,6 +400,8 @@ export default function FarmModel() {
   const [showTags, setShowTags] = useState(true);
   const [calm, setCalm] = useState(false);
   const [logLines, setLogLines] = useState(LOG_SHOWN[0]);
+  const [logSpecies, setLogSpecies] = useState("all");
+  const [logKind, setLogKind] = useState("all");
   const [lowAt, setLowAt] = useState(LOW_AT);
   /** Never let a source fall below this share of capacity. 0 is off. */
   const [keepAt, setKeepAt] = useState(() => Math.round(stockFloor() * 100));
@@ -572,21 +574,40 @@ export default function FarmModel() {
       const { farm: next, died, dried, born, contests } = farmRef.current.stepAll();
       setFarm(next);
       for (const source of dried) pushLog(`${source.name} has run dry.`, "empty");
-      for (const settled of contests) pushLog(contestNotice(settled), "contest");
-      for (const baby of born) pushLog(baby.birthNotice(), "born");
-      for (const animal of died) pushLog(animal.epitaph(), "died");
+      for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
+      for (const baby of born) pushLog(baby.birthNotice(), "born", baby.species);
+      for (const animal of died) pushLog(animal.epitaph(), "died", animal.species);
     }, stepMs);
     return () => window.clearInterval(timer);
   }, [roaming, stepMs]);
 
-  function pushLog(text, kind) {
-    setLog((l) => [{ id: `${Date.now()}-${Math.random()}`, text, kind }, ...l].slice(0, LOG_KEPT));
+  const shownLog = log
+    .filter((e) => (logSpecies === "all" || e.species === logSpecies)
+      && (logKind === "all" || e.kind === logKind))
+    .slice(0, logLines);
+
+  /**
+   * What a filter offers: whatever the log actually holds, plus the current
+   * choice — so a filter never falls out of its own dropdown as the lines it
+   * was matching roll off the end.
+   */
+  function logOptions(key, chosen) {
+    const seen = new Set(log.map((e) => e[key]).filter(Boolean));
+    if (chosen !== "all") seen.add(chosen);
+    return [...seen].sort();
+  }
+
+  function pushLog(text, kind, species) {
+    setLog((l) => [
+      { id: `${Date.now()}-${Math.random()}`, text, kind, species },
+      ...l,
+    ].slice(0, LOG_KEPT));
   }
 
   function runAction(kind) {
     if (!selected) return;
     if (kind === "move") return walk(selected);
-    pushLog(selected[kind](), kind);
+    pushLog(selected[kind](), kind, selected.species);
     if (kind === "makeSound") {
       setSpeakingId(selected.id);
       window.clearTimeout(runAction._t);
@@ -602,13 +623,13 @@ export default function FarmModel() {
     const { farm: next, outcome, died, born, contests } = farm.step(animal.id);
     setFarm(next);
     if (outcome === "blocked") {
-      pushLog(`${animal.name} is hemmed in and stays put.`, "move");
+      pushLog(`${animal.name} is hemmed in and stays put.`, "move", animal.species);
     } else {
-      pushLog(animal.narrate(), animal.goal);
+      pushLog(animal.narrate(), animal.goal, animal.species);
     }
-    for (const settled of contests) pushLog(contestNotice(settled), "contest");
-    for (const baby of born) pushLog(baby.birthNotice(), "born");
-    for (const lost of died) pushLog(lost.epitaph(), "died");
+    for (const s of contests) pushLog(contestNotice(s), "contest", s.loser.species);
+    for (const baby of born) pushLog(baby.birthNotice(), "born", baby.species);
+    for (const lost of died) pushLog(lost.epitaph(), "died", lost.species);
   }
 
   /**
@@ -721,7 +742,7 @@ export default function FarmModel() {
     const fresh = speciesNamed(species).random();
     const { farm: next, added } = farm.add(fresh);
     if (!added) {
-      pushLog(`No room in the pasture for another ${fresh.species.toLowerCase()}.`, "info");
+      pushLog(`No room in the pasture for another ${fresh.species.toLowerCase()}.`, "info", fresh.species);
       return;
     }
     setFarm(next);
@@ -729,7 +750,7 @@ export default function FarmModel() {
     setShowSource(false);
     // The newcomer's card is under the field, so go and look at it.
     showTab("pasture");
-    pushLog(`${fresh.name} the ${fresh.species.toLowerCase()} joins the farm.`, "info");
+    pushLog(`${fresh.name} the ${fresh.species.toLowerCase()} joins the farm.`, "info", fresh.species);
   }
 
   function removeSelected() {
@@ -738,7 +759,7 @@ export default function FarmModel() {
     setFarm(farm.remove(id));
     setSelectedId(null);
     setShowSource(false);
-    pushLog(`${name} the ${species.toLowerCase()} leaves the pasture.`, "info");
+    pushLog(`${name} the ${species.toLowerCase()} leaves the pasture.`, "info", species);
   }
 
   return (
@@ -1488,8 +1509,29 @@ export default function FarmModel() {
         </div>
 
         <div className="fa-log">
-          <div className="fa-log-title">Activity log</div>
-          {log.slice(0, logLines).map((entry) => (
+          <div className="fa-log-head">
+            <div className="fa-log-title">Activity log</div>
+            <select
+              value={logSpecies}
+              aria-label="Filter log by animal"
+              onChange={(e) => setLogSpecies(e.target.value)}
+            >
+              <option value="all">All animals</option>
+              {logOptions("species", logSpecies).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select
+              value={logKind}
+              aria-label="Filter log by activity"
+              onChange={(e) => setLogKind(e.target.value)}
+            >
+              <option value="all">All activity</option>
+              {logOptions("kind", logKind).map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+          {shownLog.length === 0 && (
+            <div className="fa-log-row"><span>Nothing in the log matches that filter.</span></div>
+          )}
+          {shownLog.map((entry) => (
             <div className="fa-log-row" key={entry.id}>
               <span className="k">{entry.kind === "info" ? "•" : entry.kind}</span>
               <span>{entry.text}</span>

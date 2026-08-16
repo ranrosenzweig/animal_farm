@@ -1069,6 +1069,21 @@
   max-height: 420px;
   overflow-y: auto;
 }
+.fa-log-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.fa-log-head .fa-log-title { margin-bottom: 0; margin-right: auto; }
+.fa-log-head select {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  background: white;
+}
 .fa-log-title {
   font-size: 10.5px;
   text-transform: uppercase;
