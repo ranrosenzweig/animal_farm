@@ -127,6 +127,17 @@ export const GOALS = {
     narrate: (a) => `${a.name} goes looking for a mate.`,
   },
 
+  // A chore, not a want: it relieves nothing, so whoever does it does it at
+  // the standing pressure behind everything that isn't an ache. The place is
+  // the trough that most needs filling — only the Farm can say which — and
+  // null when every source is comfortable, so a farmer with nothing to do
+  // wanders like anything else.
+  tend: {
+    relieves: null,
+    place: (animal, { farm } = {}) => farm?.neediestResource() ?? null,
+    narrate: (a) => `${a.name} tops up what the herd has drunk down.`,
+  },
+
   rest: {
     relieves: "fatigue",
     place: () => null,

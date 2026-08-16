@@ -14,7 +14,7 @@ export default class Sheep extends Animal {
   static turnRate = 0.3;
 
   // Feels being alone faster than it feels anything else.
-  static affinities = { flock: 1.0, graze: 0.9, drink: 0.6, rest: 0.5, wallow: 0, roam: 0.3, mate: 0.6 };
+  static affinities = { flock: 1.0, graze: 0.9, drink: 0.6, rest: 0.5, wallow: 0, roam: 0.3, mate: 0.6, tend: 0 };
   static driveRates = { hunger: 0.005, thirst: 0.005, fatigue: 0.003, loneliness: 0.010, urge: 0.003 };
   static intake = 0.6;
 

@@ -20,7 +20,7 @@
 // them is the speed cap, which is the physical version of the same worry.
 import { seed } from "../src/model/random.js";
 import Farm from "../src/model/Farm.js";
-import { SPECIES } from "../src/model/species.js";
+import { SPECIES, Human } from "../src/model/species.js";
 import { PASTURE, inBounds } from "../src/model/pasture.js";
 import { OBSTACLES, STEEPEST, obstaclePenetration } from "../src/model/terrain.js";
 import { CONTACT_SLOP, GRAVITY, STOPPED, responseTime } from "../src/model/physics.js";
@@ -233,8 +233,14 @@ console.log(`Most any body was carried past its own cruising speed in one step: 
 
 // Famine: with nothing in the field at all, every animal must eventually die
 // and leave it. An animal that survives on an empty farm is a broken model.
+//
+// The farmer is deliberately left out, and that is the whole of what he is:
+// he carries hay and water out of the barn, so a field that is bare of
+// everything except him is not a field with nothing in it. What he can do with
+// that is tested on its own below.
+const HERDING = SPECIES.filter((Species) => Species !== Human);
 let bare = new Farm("Famine");
-for (const Species of SPECIES) bare = bare.add(Species.random()).farm;
+for (const Species of HERDING) bare = bare.add(Species.random()).farm;
 const startedWith = bare.size;
 let buried = 0;
 let famineRounds = 0;
@@ -251,6 +257,33 @@ if (bare.size > 0) {
 } else {
   console.log(`Famine: all ${buried} of ${startedWith} animals died within ${famineRounds} rounds ` +
     `on an empty field (of ${[...causes].join(" and ")}).`);
+}
+
+// Tending: the same bare field, with Old MacDonald standing on it. The herd
+// that died above has to still be a herd — he sows a fresh source when a kind
+// runs out and fills it from the barn, so the field must have both kinds on it
+// and something alive to drink them. Deliberately not a promise that nobody
+// dies: he can only be in one place, and an animal that will not walk to water
+// is not his fault.
+{
+  let kept = new Farm("Tending");
+  for (const Species of SPECIES) kept = kept.add(Species.random()).farm;
+  for (let round = 1; round <= 600; round++) kept = kept.stepAll().farm;
+
+  const farmer = kept.animals.find((a) => a instanceof Human);
+  const herd = kept.size - (farmer ? 1 : 0);
+  const bareOf = kept.stock().filter((s) => s.sources === 0 || s.volume <= 0);
+  if (!farmer) fail("tending: Old MacDonald did not survive 600 rounds of his own farm");
+  if (herd === 0) fail("tending: the whole herd died in 600 rounds with the farmer on the field");
+  for (const s of bareOf) fail(`tending: 600 rounds in and the field has no ${s.kind} on it at all`);
+  if (farmer && farmer.stores >= Human.stores) {
+    fail(`tending: the barn is still full at ${Math.round(farmer.stores)} — he put nothing down`);
+  }
+  if (failures === 0) {
+    console.log(`Tending: 600 rounds on a field that started bare — ${herd} of ${SPECIES.length - 1} still ` +
+      `alive, ${Math.round(Human.stores - farmer.stores)} units out of the barn, ` +
+      `field holding ${kept.stock().map((s) => `${s.volume} ${s.unit} of ${s.kind}`).join(" and ")}.`);
+  }
 }
 
 // Held levels: the opposite of famine. What is held is the reading, not the

@@ -15,7 +15,7 @@ export default class Horse extends Animal {
   static turnRate = 0.3;  // committed to its line; comes about in a wide arc
 
   // Would rather be running than doing anything else.
-  static affinities = { roam: 1.0, graze: 0.7, drink: 0.6, rest: 0.4, flock: 0.3, wallow: 0, mate: 0.6 };
+  static affinities = { roam: 1.0, graze: 0.7, drink: 0.6, rest: 0.4, flock: 0.3, wallow: 0, mate: 0.6, tend: 0 };
   static driveRates = { hunger: 0.005, thirst: 0.006, fatigue: 0.006, loneliness: 0.004, urge: 0.003 };
   static intake = 0.9;
 

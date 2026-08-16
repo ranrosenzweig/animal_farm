@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright
 # Animal names and the arrows below outrun the Windows console's default cp1252.
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-SPECIES = ["Cow", "Chicken", "Pig", "Sheep", "Horse", "Duck"]
+SPECIES = ["Cow", "Chicken", "Pig", "Sheep", "Horse", "Duck", "Human"]
 STEP_MS = 600
 
 findings = []

@@ -15,7 +15,7 @@ export default class Chicken extends Animal {
   static turnRate = 0.6;  // nimble — turns almost on the spot
 
   // Pecks constantly and keeps its own company.
-  static affinities = { graze: 1.0, roam: 0.7, drink: 0.5, rest: 0.4, flock: 0.2, wallow: 0, mate: 0.5 };
+  static affinities = { graze: 1.0, roam: 0.7, drink: 0.5, rest: 0.4, flock: 0.2, wallow: 0, mate: 0.5, tend: 0 };
   static driveRates = { hunger: 0.009, thirst: 0.005, fatigue: 0.002, loneliness: 0.002, urge: 0.004 };
   static intake = 0.3;
 

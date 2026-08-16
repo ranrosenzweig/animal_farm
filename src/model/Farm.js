@@ -190,6 +190,34 @@ export default class Farm {
     return nearest;
   }
 
+  /**
+   * Put a fresh source down where somebody is standing, in the middle of a
+   * round. `addResource` is the UI's version and hands back a new Farm, which
+   * is no use to a farmer sowing a patch during his own step — this goes
+   * straight into the field the round's `settled` is about to build.
+   * @returns {Resource}
+   */
+  sow(kind, at, volume) {
+    const resource = new Resource(kind, clampToPasture(at), { volume });
+    this.resources.push(resource);
+    return resource;
+  }
+
+  /**
+   * The source most in need of a bucket: the emptiest one still in the field,
+   * and only once it has fallen below `below` — a trough that is nearly full
+   * is not a chore. Null when everything is comfortable.
+   * @returns {Resource | null}
+   */
+  neediestResource(below = 0.6) {
+    let worst = null;
+    for (const resource of this.resources) {
+      if (resource.depleted || resource.fullness >= below) continue;
+      if (!worst || resource.fullness < worst.fullness) worst = resource;
+    }
+    return worst;
+  }
+
   /* ---------------------------------------------------------------- */
   /* Breeding                                                          */
   /* ---------------------------------------------------------------- */
