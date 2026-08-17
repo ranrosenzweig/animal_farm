@@ -248,6 +248,11 @@ const COLOR_OF = new Map(SPECIES.map((Species, i) => [Species.species, SERIES[i 
 /** Chart chrome. Recessive by design: the data is the only loud thing. */
 const INK = { grid: "#e6e2d4", axis: "#c9c2ac", muted: "#8a8271" };
 
+/* Coming and going. Not read off the species palette: these two are the one
+   pair on the page that has to read as opposites at a glance. */
+const BORN_COLOR = "#1baf7a";
+const LOST_COLOR = "#a13c2c";
+
 /** How many days of the farm's own history the statistics keep. */
 const RECORDED = 60;
 
@@ -318,15 +323,25 @@ function driveColor(level) {
  *
  * @param {{ rows: { key: string, title: string, parts: { key: string, value: number, color: string }[] }[] }} props
  */
-function Columns({ rows, max, height = 88, gap = 2, label, empty = "nothing recorded yet" }) {
+function Columns({ rows, max, height = 88, gap = 2, label, onHover, empty = "nothing recorded yet" }) {
   if (rows.length === 0) return <div className="fa-chart-empty" style={{ height }}>{empty}</div>;
   const ceiling = max > 0 ? max : 1;
   return (
     // One label for the whole chart rather than 365 tab stops: the numbers a
     // reader actually needs are beside it in text either way.
-    <div className="fa-cols" style={{ height, gap }} role="img" aria-label={label}>
+    //
+    // The leave handler sits on the row, not on each column: moving from one
+    // column to the next fires the old column's leave after the new column's
+    // move, which would blank the readout the neighbour had just filled in.
+    <div
+      className="fa-cols"
+      style={{ height, gap }}
+      role="img"
+      aria-label={label}
+      onMouseLeave={() => onHover?.(null)}
+    >
       {rows.map((row) => (
-        <div className="col" key={row.key} title={row.title}>
+        <div className="col" key={row.key} onMouseMove={(e) => onHover?.(row.title, e)}>
           {row.parts.map((part) => (
             <span
               key={part.key}
@@ -347,10 +362,17 @@ function Columns({ rows, max, height = 88, gap = 2, label, empty = "nothing reco
  * day units and stretched to the box, so the stroke is pinned to real pixels
  * with `non-scaling-stroke` rather than being squashed with the geometry.
  */
-function Trace({ points, low, high, color, height = 88, zero = null }) {
+function Trace({ points, low, high, color, height = 88, zero = null, labels, onHover }) {
   const span = high - low || 1;
   const at = (value) => ((high - value) / span) * 100;
   const line = points.map((p, i) => `${i},${at(p)}`).join(" ");
+  // The line is one shape, not 365 of them, so the day under the pointer is
+  // worked out from how far across the box it is rather than from what it hit.
+  const read = (e) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const i = Math.round(((e.clientX - box.left) / box.width) * (points.length - 1));
+    onHover?.(labels?.[Math.min(points.length - 1, Math.max(0, i))], e);
+  };
   return (
     <svg
       className="fa-trace"
@@ -358,6 +380,8 @@ function Trace({ points, low, high, color, height = 88, zero = null }) {
       viewBox={`0 0 ${points.length - 1} 100`}
       preserveAspectRatio="none"
       aria-hidden="true"
+      onMouseMove={onHover && read}
+      onMouseLeave={() => onHover?.(null)}
     >
       <polygon fill={color} fillOpacity="0.13" points={`0,100 ${line} ${points.length - 1},100`} />
       {zero != null && zero > low && zero < high && (
@@ -371,6 +395,39 @@ function Trace({ points, low, high, color, height = 88, zero = null }) {
         vectorEffect="non-scaling-stroke" points={line}
       />
     </svg>
+  );
+}
+
+/** An axis label: whole numbers once they are big enough to need no tenth. */
+const tick = (v) => (Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+
+/**
+ * A chart in its frame — the value axis down the left, a hairline across at
+ * the halfway mark, and the day marks underneath.
+ *
+ * The frame owns the height and the chart inside it fills that, so the axis
+ * labels sit on the marks they belong to at any size. Callers pass their chart
+ * `height="100%"`.
+ *
+ * @param {{ foot?: string[] }} props The x axis, spread across the bottom.
+ */
+function Framed({ high, low = 0, unit = "", height = 88, foot, children }) {
+  return (
+    <div className="fa-framed">
+      <div className="fa-grid" style={{ height }}>
+        <div className="fa-yaxis">
+          <span>{tick(high)}{unit && ` ${unit}`}</span>
+          <span>{tick((high + low) / 2)}</span>
+          <span>{tick(low)}</span>
+        </div>
+        <div className="fa-area">{children}</div>
+      </div>
+      {foot && (
+        <div className="fa-xaxis">
+          {foot.map((mark, i) => <span key={i}>{mark}</span>)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -404,6 +461,14 @@ export default function FarmModel() {
   const [showSource, setShowSource] = useState(false);
   const [roaming, setRoaming] = useState(false);
   const [tab, setTab] = useState(TABS[0].id);
+  /**
+   * What the pointer is over in the statistics, and where the pointer is. One
+   * readout for every chart on the page: only one of them can be under the
+   * pointer, and a tooltip that follows the cursor needs no room reserved for
+   * it in any of their layouts.
+   */
+  const [tip, setTip] = useState(null);
+  const showTip = (text, e) => setTip(text ? { text, x: e.clientX, y: e.clientY } : null);
   /** Whether the drawer of chores above the field is open. Shut on arrival. */
   const [chores, setChores] = useState(false);
   /** Which kind of resource the next pasture click puts down, if any. */
@@ -485,6 +550,12 @@ export default function FarmModel() {
    * it happens.
    */
   const history = useRef([]);
+  /**
+   * Running totals of the herd's comings and goings. A birth and a death on
+   * the same day cancel out in the head count, so neither can be read back off
+   * the record afterwards — they have to be counted as they happen.
+   */
+  const events = useRef({ born: 0, died: 0 });
   useEffect(() => {
     const day = farm.clock.day;
     const last = history.current[history.current.length - 1];
@@ -501,6 +572,7 @@ export default function FarmModel() {
         // any one day is the step up from the day before, and a total survives
         // a farmer who dies and a day nobody watched.
         carried: { ...(farm.animals.find((a) => a instanceof Human)?.carried ?? {}) },
+        events: { ...events.current },
       },
     ];
   }, [farm]);
@@ -551,6 +623,37 @@ export default function FarmModel() {
     };
   });
   const carriedMax = Math.max(1, ...carriedRows.map((r) => r.parts.reduce((t, p) => t + p.value, 0)));
+
+  /* Births against deaths, the same way: running totals differenced day by
+     day. The ratio is over the whole recorded stretch rather than the day —
+     a day is one or two animals either way, which is noise, and it is the
+     stretch that says whether the herd is growing or being buried. */
+  const lifeRows = recorded.slice(1).map((r, i) => {
+    const born = r.events.born - recorded[i].events.born;
+    const died = r.events.died - recorded[i].events.died;
+    return {
+      key: r.day,
+      title: `Day ${r.day}: ${born} born, ${died} lost`,
+      parts: [
+        { key: "born", value: born, color: BORN_COLOR },
+        { key: "died", value: died, color: LOST_COLOR },
+      ].filter((p) => p.value > 0),
+    };
+  });
+  const lifeMax = Math.max(1, ...lifeRows.map((r) => r.parts.reduce((t, p) => t + p.value, 0)));
+  const bornTotal = recorded.length ? recorded[recorded.length - 1].events.born - recorded[0].events.born : 0;
+  const lostTotal = recorded.length ? recorded[recorded.length - 1].events.died - recorded[0].events.died : 0;
+  // Nothing buried is not an infinite ratio, it is a ratio nobody can quote.
+  const lifeRatio = lostTotal ? `×${(bornTotal / lostTotal).toFixed(2)}` : "—";
+
+  /* The x axis of a chart drawn from the record: the day it starts, the day in
+     the middle, the day it ends. Read off the rows rather than the record,
+     because the charts built from differences start a day later than it. */
+  const dayMarks = (rows) => (rows.length
+    ? [`day ${rows[0].key}`, rows.length > 2 ? `day ${rows[Math.floor(rows.length / 2)].key}` : "", `day ${rows[rows.length - 1].key}`]
+    : null);
+  const recordMarks = dayMarks(herdRows);
+
   const warmest = Math.max(...year.map((d) => d.tempC));
   const coldest = Math.min(...year.map((d) => d.tempC));
   const wettest = Math.max(1, ...year.map((d) => d.wetHours));
@@ -622,6 +725,10 @@ export default function FarmModel() {
     const timer = window.setInterval(() => {
       const { farm: next, died, dried, born, contests, chores, hired, left, wages } = farmRef.current.stepAll();
       setFarm(next);
+      events.current = {
+        born: events.current.born + born.length,
+        died: events.current.died + died.length,
+      };
       if (wages) pushLog(marketNotice(wages), "info", "Human");
       for (const hand of hired) {
         pushLog(`${hand.name} is taken on as a farmhand.`, "info", hand.species);
@@ -655,8 +762,14 @@ export default function FarmModel() {
   }
 
   function pushLog(text, kind, species) {
+    // The farm's own clock, not the wall's: a line about a cow drinking at
+    // dusk means dusk on this farm, and the wall clock says nothing about a
+    // day that lasts a minute. Read through the ref, so a line raised by the
+    // roam timer is stamped with the step it happened in rather than with
+    // whatever the last render happened to close over.
+    const { day, time } = farmRef.current.clock;
     setLog((l) => [
-      { id: `${Date.now()}-${Math.random()}`, text, kind, species },
+      { id: `${Date.now()}-${Math.random()}`, at: `d${day} ${time}`, text, kind, species },
       ...l,
     ].slice(0, LOG_KEPT));
   }
@@ -679,6 +792,10 @@ export default function FarmModel() {
   function walk(animal) {
     const { farm: next, outcome, died, born, contests, chores, hired, left } = farm.step(animal.id);
     setFarm(next);
+    events.current = {
+      born: events.current.born + born.length,
+      died: events.current.died + died.length,
+    };
     if (outcome === "blocked") {
       pushLog(`${animal.name} is hemmed in and stays put.`, "move", animal.species);
     } else {
@@ -1322,15 +1439,20 @@ export default function FarmModel() {
             The herd, at the turn of each day
             <span className="note">{recorded.length ? `days ${recorded[0].day}–${recorded[recorded.length - 1].day}` : ""}</span>
           </div>
-          <Columns
-            rows={herdRows}
-            max={herdMax}
-            label={`Head count at the turn of each of the last ${recorded.length} days, stacked by species. ${herdMax} head at the fullest.`}
-            empty="nothing counted yet — let them roam through a night"
-          />
-          <div className="fa-axis">
-            <span>{recorded.length ? `day ${recorded[0].day}` : ""}</span>
-            <span>{herdMax} head at the fullest</span>
+          {/* Named down the left like every other chart on the page, which is
+              what puts its first column on the same vertical as theirs. */}
+          <div className="fa-pair">
+            <span className="side">👥 Head count</span>
+            <Framed high={herdMax} unit="head" height={120} foot={recordMarks}>
+              <Columns
+                rows={herdRows}
+                max={herdMax}
+                height="100%"
+                onHover={showTip}
+                label={`Head count at the turn of each of the last ${recorded.length} days, stacked by species. ${herdMax} head at the fullest.`}
+                empty="nothing counted yet — let them roam through a night"
+              />
+            </Framed>
           </div>
           {/* Not colour alone: every band is named, with its own count beside
               it, and the emoji is the same one on the pen above. */}
@@ -1342,6 +1464,28 @@ export default function FarmModel() {
               </span>
             ))}
           </div>
+
+          {/* Why the line above moves. A day's births and deaths cancel out in
+              a head count, so a herd that is burying as fast as it breeds looks
+              from up there like a herd where nothing happens. */}
+          <div className="fa-pair">
+            <span className="side">🐣 Born and lost<b>{bornTotal} / {lostTotal}</b></span>
+            <Framed high={lifeMax} unit="a day" height={54} foot={dayMarks(lifeRows)}>
+              <Columns
+                rows={lifeRows}
+                max={lifeMax}
+                height="100%"
+                onHover={showTip}
+                label={`Births and deaths on each of the last ${lifeRows.length} days: ${bornTotal} born against ${lostTotal} lost.`}
+                empty="nothing born or buried yet — let them roam through a night"
+              />
+            </Framed>
+          </div>
+          <div className="fa-legend">
+            <span className="key"><i style={{ background: BORN_COLOR }} />Born <b>{bornTotal}</b></span>
+            <span className="key"><i style={{ background: LOST_COLOR }} />Lost <b>{lostTotal}</b></span>
+            <span className="key">Born per death <b>{lifeRatio}</b></span>
+          </div>
         </div>
 
         {/* Two charts, not one with two scales: litres and kilogrammes share
@@ -1351,18 +1495,23 @@ export default function FarmModel() {
           <div className="fa-card-title">In the field, at the turn of each day</div>
           {stock.map((s) => (
             <div className="fa-pair" key={s.kind}>
-              <span className="side">{RESOURCE_ICONS[s.kind]} {s.label}<b>{stockMax[s.kind]} {s.unit}</b></span>
-              <Columns
-                rows={recorded.map((r) => ({
-                  key: r.day,
-                  title: `Day ${r.day}: ${r.stock[s.kind]} ${s.unit} of ${s.kind}`,
-                  parts: [{ key: s.kind, value: r.stock[s.kind], color: SERIES[s.kind === "water" ? 0 : 5] }],
-                }))}
-                max={stockMax[s.kind]}
-                height={54}
-                label={`${s.label} in the field at the turn of each of the last ${recorded.length} days, ${stockMax[s.kind]} ${s.unit} at the fullest.`}
-                empty="nothing recorded yet"
-              />
+              {/* The ceiling used to be stated here because nothing else
+                  stated it. The axis does now. */}
+              <span className="side">{RESOURCE_ICONS[s.kind]} {s.label}</span>
+              <Framed high={stockMax[s.kind]} unit={s.unit} height={72} foot={recordMarks}>
+                <Columns
+                  rows={recorded.map((r) => ({
+                    key: r.day,
+                    title: `Day ${r.day}: ${Math.round(r.stock[s.kind])} ${s.unit} of ${s.kind}`,
+                    parts: [{ key: s.kind, value: r.stock[s.kind], color: SERIES[s.kind === "water" ? 0 : 5] }],
+                  }))}
+                  max={stockMax[s.kind]}
+                  height="100%"
+                  onHover={showTip}
+                  label={`${s.label} in the field at the turn of each of the last ${recorded.length} days, ${stockMax[s.kind]} ${s.unit} at the fullest.`}
+                  empty="nothing recorded yet"
+                />
+              </Framed>
             </div>
           ))}
         </div>
@@ -1414,14 +1563,17 @@ export default function FarmModel() {
             </div>
           </div>
           <div className="fa-pair">
-            <span className="side">🧰 Carried out<b>{carriedMax} a day</b></span>
-            <Columns
-              rows={carriedRows}
-              max={carriedMax}
-              height={54}
-              label={`What ${farmer.name} carried out to the field on each of the last ${carriedRows.length} days, water and grass stacked, up to ${carriedMax} in a day.`}
-              empty="nothing carried yet — let them roam through a night"
-            />
+            <span className="side">🧰 Carried out</span>
+            <Framed high={carriedMax} unit="a day" height={72} foot={dayMarks(carriedRows)}>
+              <Columns
+                rows={carriedRows}
+                max={carriedMax}
+                height="100%"
+                onHover={showTip}
+                label={`What ${farmer.name} carried out to the field on each of the last ${carriedRows.length} days, water and grass stacked, up to ${carriedMax} in a day.`}
+                empty="nothing carried yet — let them roam through a night"
+              />
+            </Framed>
           </div>
         </div>
         )}
@@ -1431,30 +1583,40 @@ export default function FarmModel() {
             The year <span className="note">day {clock.dayOfYear + 1} of {DAYS_PER_YEAR} · {clock.season}</span>
           </div>
           <div className="fa-pair">
-            <span className="side">🌡 Temperature<b>{Math.round(coldest)}–{Math.round(warmest)}°C</b></span>
-            <div className="fa-plot">
-              <Trace points={year.map((d) => d.tempC)} low={coldest} high={warmest} zero={0} color={SERIES[1]} />
-              <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
-            </div>
+            <span className="side">🌡 Temperature</span>
+            <Framed high={warmest} low={coldest} unit="°C" height={72}>
+              <div className="fa-plot">
+                <Trace
+                  points={year.map((d) => d.tempC)}
+                  labels={year.map((d) => `Day ${d.day + 1} (${d.season}): ${d.tempC.toFixed(1)}°C, ${d.daylength.toFixed(1)} h of light`)}
+                  onHover={showTip}
+                  low={coldest} high={warmest} zero={0} color={SERIES[1]} height="100%"
+                />
+                <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
+              </div>
+            </Framed>
           </div>
           <div className="fa-pair">
-            <span className="side">🌧 Rain<b>{wettest} h/day</b></span>
-            <div className="fa-plot">
-              <Columns
-                rows={year.map((d) => ({
-                  key: d.day,
-                  title: `Day ${d.day + 1} (${d.season}): ${d.wetHours
-                    ? `${d.wetHours} h of ${d.sky}, ${Math.round(d.wettest * 100)}% at its heaviest`
-                    : "dry"}`,
-                  parts: [{ key: "wet", value: d.wetHours, color: SERIES[0] }],
-                }))}
-                max={wettest}
-                height={54}
-                gap={0}
-                label={`Hours of rain or snow on each day of the year, up to ${wettest} in a day. Wettest in autumn, driest in summer.`}
-              />
-              <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
-            </div>
+            <span className="side">🌧 Rain</span>
+            <Framed high={wettest} unit="h" height={72}>
+              <div className="fa-plot">
+                <Columns
+                  rows={year.map((d) => ({
+                    key: d.day,
+                    title: `Day ${d.day + 1} (${d.season}): ${d.wetHours
+                      ? `${d.wetHours} h of ${d.sky}, ${Math.round(d.wettest * 100)}% at its heaviest`
+                      : "dry"}`,
+                    parts: [{ key: "wet", value: d.wetHours, color: SERIES[0] }],
+                  }))}
+                  max={wettest}
+                  height="100%"
+                  gap={0}
+                  onHover={showTip}
+                  label={`Hours of rain or snow on each day of the year, up to ${wettest} in a day. Wettest in autumn, driest in summer.`}
+                />
+                <span className="today" style={{ left: `${(clock.dayOfYear / DAYS_PER_YEAR) * 100}%` }} />
+              </div>
+            </Framed>
           </div>
           <SeasonAxis year={year} />
           <div className="fa-tiles">
@@ -1467,6 +1629,17 @@ export default function FarmModel() {
             ))}
           </div>
         </div>
+
+        {/* One readout for the whole page, pinned to the pointer. Clamped off
+            the right edge so a long day's line is not half off the window. */}
+        {tip && (
+          <div
+            className="fa-tip"
+            style={{ left: Math.min(tip.x + 12, window.innerWidth - 260), top: tip.y + 16 }}
+          >
+            {tip.text}
+          </div>
+        )}
       </div>
       )}
 
@@ -1482,6 +1655,7 @@ export default function FarmModel() {
 
           <div className="fa-set-row">
             <span className="l" id="set-step">Step length</span>
+            <span className="why">How long the farm waits between steps. Shorter runs the whole farm faster, thinking and all.</span>
             <input
               type="range"
               min={STEP_MIN}
@@ -1500,6 +1674,10 @@ export default function FarmModel() {
               in front of them. */}
           <div className="fa-set-row">
             <span className="l" id="set-day">A day takes</span>
+            <span className="why">
+              How much of a day one step is worth — {dayRounds} steps from dawn to dawn. Fewer steps
+              means a faster year: seasons, weather and daylight all turn with it.
+            </span>
             <input
               type="range"
               min={8}
@@ -1527,6 +1705,10 @@ export default function FarmModel() {
               of full, however much the herd drinks. */}
           <div className="fa-set-row">
             <span className="l" id="set-keep">Keep stocked</span>
+            <span className="why">
+              A standing order on the troughs and patches: no source is ever left below this share of
+              full. Off leaves the refilling to the farmer and to you.
+            </span>
             <input
               type="range"
               min={0}
@@ -1546,6 +1728,10 @@ export default function FarmModel() {
 
           <div className="fa-set-row">
             <span className="l" id="set-mind">Animal mind</span>
+            <span className="why">
+              What picks an animal&apos;s next goal: the built-in rules, or Claude asked over the
+              local proxy. The drives and the body are the same either way.
+            </span>
             <select
               value={mindKind}
               aria-labelledby="set-mind"
@@ -1559,6 +1745,10 @@ export default function FarmModel() {
 
           <div className="fa-set-row">
             <span className="l" id="set-cadence">Rethink every</span>
+            <span className="why">
+              How often an animal is allowed to change its mind. Rarely makes for stubborn animals
+              that finish what they start; every step makes for fickle ones.
+            </span>
             <input
               type="range"
               min={1}
@@ -1572,6 +1762,10 @@ export default function FarmModel() {
 
           <div className="fa-set-row">
             <span className="l" id="set-low">Warn below</span>
+            <span className="why">
+              A trough or patch that falls below this puts a line in the log — early enough to walk
+              over and top it up before anyone goes thirsty.
+            </span>
             <input
               type="range"
               min={5}
@@ -1586,6 +1780,10 @@ export default function FarmModel() {
 
           <div className="fa-set-row">
             <span className="l" id="set-log">Log lines</span>
+            <span className="why">
+              How much of the activity log is shown at once. {LOG_KEPT} lines are kept either way,
+              so a longer list can be read back without missing anything.
+            </span>
             <select
               value={logLines}
               aria-labelledby="set-log"
@@ -1595,29 +1793,50 @@ export default function FarmModel() {
             </select>
           </div>
 
-          <div className="fa-set-checks">
-            <label>
-              <input type="checkbox" checked={showTags} onChange={(e) => setShowTags(e.target.checked)} />
-              Name tags
-            </label>
-            <label>
-              <input type="checkbox" checked={calm} onChange={(e) => setCalm(e.target.checked)} />
-              Calm motion
-            </label>
-            {/* Not the same as keeping them stocked: that one refills at the end
-                of every round, this one holds the levels exactly where they
-                stand — a half-empty pond stays half-empty for good. */}
-            <label title="Animals drink and graze as usual; the levels stop moving">
-              <input
-                type="checkbox"
-                checked={held}
-                onChange={(e) => {
-                  setHeldLevels(e.target.checked);
-                  setHeld(e.target.checked);
-                }}
-              />
-              Hold water and grass levels
-            </label>
+          {/* The switches keep the same four columns as the knobs above, so
+              the card reads down as one list rather than as two. The name is
+              a label of its own, so it is still the checkbox's hit area even
+              though the box now sits in the control column away from it. */}
+          <div className="fa-set-row">
+            <label className="l" htmlFor="set-tags">Name tags</label>
+            <span className="why">Each animal&apos;s name floats over it out in the field.</span>
+            <input
+              className="c"
+              id="set-tags"
+              type="checkbox"
+              checked={showTags}
+              onChange={(e) => setShowTags(e.target.checked)}
+            />
+          </div>
+
+          <div className="fa-set-row">
+            <label className="l" htmlFor="set-calm">Calm motion</label>
+            <span className="why">Stills the bobbing, swaying and drifting — the farm still runs, it just holds still.</span>
+            <input
+              className="c"
+              id="set-calm"
+              type="checkbox"
+              checked={calm}
+              onChange={(e) => setCalm(e.target.checked)}
+            />
+          </div>
+
+          {/* Not the same as keeping them stocked: that one refills at the end
+              of every round, this one holds the levels exactly where they
+              stand — a half-empty pond stays half-empty for good. */}
+          <div className="fa-set-row">
+            <label className="l" htmlFor="set-hold">Hold levels</label>
+            <span className="why">Animals drink and graze as usual; the levels stop moving. A half-empty pond stays half-empty.</span>
+            <input
+              className="c"
+              id="set-hold"
+              type="checkbox"
+              checked={held}
+              onChange={(e) => {
+                setHeldLevels(e.target.checked);
+                setHeld(e.target.checked);
+              }}
+            />
           </div>
 
           {mindKind === "claude" && (
@@ -1653,6 +1872,7 @@ export default function FarmModel() {
           )}
           {shownLog.map((entry) => (
             <div className="fa-log-row" key={entry.id}>
+              <span className="t">{entry.at}</span>
               <span className="k">{entry.kind === "info" ? "•" : entry.kind}</span>
               <span>{entry.text}</span>
             </div>

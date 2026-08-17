@@ -156,10 +156,12 @@
   gap: 16px;
   padding: 16px;
 }
-/* The desk is read, not watched. Left the full width of the page its
-   sliders would be a metre long and its log lines too wide to track
-   back to the left margin. */
-.fa-desk { max-width: 760px; }
+/* The desk is read, not watched — but a chart is read across, and 760px
+   of a sixty-day record left every column a hairline. The page is wide
+   now and the things that must not be a metre long say so themselves:
+   the sliders cap their own width, the explanation beside them takes
+   the slack, and the log lines have their own measure. */
+.fa-desk { max-width: 1180px; }
 
 .fa-pasture {
   position: relative;
@@ -910,17 +912,69 @@
   color: var(--ink-muted);
 }
 .fa-trace { display: block; width: 100%; }
-.fa-axis {
+/* The frame around a chart: the value axis in a gutter down the left,
+   the day marks under it, and two hairlines across the plot — the top
+   of the scale and its halfway mark. The baseline is the third.
+   The gutter is fixed so that every chart on the card, and the season
+   labels under the year, all start on the same vertical. */
+.farm-app { --yaxis: 38px; }
+.fa-framed { flex: 1; min-width: 0; }
+.fa-grid { display: flex; gap: 6px; }
+.fa-yaxis {
+  width: var(--yaxis);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--ink-muted);
+  /* The labels name the lines they sit on, so the first and last are
+     pulled half a line up and down onto them rather than inside them. */
+  margin: -5px 0 -5px;
+}
+.fa-area {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 1px solid var(--ink-axis);
+  background:
+    linear-gradient(to bottom, var(--ink-grid) 1px, transparent 1px) 0 0 / 100% 50%;
+}
+.fa-area > * { height: 100%; }
+.fa-xaxis {
   display: flex;
   justify-content: space-between;
-  border-top: 1px solid var(--ink-axis);
-  margin-top: 4px;
-  padding-top: 3px;
+  margin: 3px 0 0 calc(var(--yaxis) + 6px);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9.5px;
+  font-size: 9px;
   color: var(--ink-muted);
 }
-.fa-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+/* The day's own figures, pinned to the pointer. Fixed, so it is placed
+   against the window rather than against whichever card it started in,
+   and transparent to the mouse so it cannot chase itself. */
+.fa-tip {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  max-width: 248px;
+  background: #2f2b22;
+  color: #fdfaf0;
+  font-size: 11.5px;
+  line-height: 1.35;
+  padding: 5px 8px;
+  border-radius: 5px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+}
+/* A legend belongs to the chart above it, so it starts where that chart
+   starts — not out at the card's edge under the name and the axis, where
+   it reads as the card's own footnote. */
+.fa-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0 calc(114px + var(--yaxis) + 6px);
+}
 .fa-legend .key {
   display: flex;
   align-items: center;
@@ -930,9 +984,9 @@
 }
 .fa-legend .key i { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
 .fa-legend .key b { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
-/* A chart with its name and its ceiling down the left, so the number
-   is readable without hunting for a tooltip. */
-.fa-pair { display: flex; align-items: stretch; gap: 10px; margin-bottom: 8px; }
+/* A chart with its name down the left. What it reaches is on its own
+   axis now, so the side says what the marks are, not how high. */
+.fa-pair { display: flex; align-items: stretch; gap: 10px; margin: 12px 0 8px; }
 .fa-pair .side {
   width: 104px;
   flex-shrink: 0;
@@ -962,7 +1016,9 @@
 .fa-seasons {
   display: flex;
   gap: 2px;
-  margin: 2px 0 10px 114px;
+  /* The side label, its gap, and the value axis: the seasons start where
+     the year's own charts start. */
+  margin: 2px 0 10px calc(114px + var(--yaxis) + 6px);
   font-size: 10px;
   color: var(--ink-muted);
   text-transform: capitalize;
@@ -1006,29 +1062,36 @@
   color: #6b5f42;
   margin-bottom: 4px;
 }
+/* Name, what it does, the control, the reading — four columns, and the
+   same four in every row. A flex row would let a long explanation shove
+   its own knob sideways; on a grid the tracks are settled once for the
+   card, so the controls line up however much any one row has to say. */
 .fa-set-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 220px 58px;
   align-items: center;
   gap: 10px;
   font-size: 12.5px;
   padding: 6px 0;
   border-bottom: 1px dashed #ececec;
 }
-.fa-set-row .l { color: #6b5f42; width: 92px; flex-shrink: 0; }
+.fa-set-row .l { color: #6b5f42; }
 /* Fixed width, monospace: the readout must not shove the slider
    sideways as the number under it gets longer. */
 .fa-set-row .v {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
   font-weight: 600;
-  width: 58px;
   text-align: right;
-  flex-shrink: 0;
 }
-.fa-set-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--wood); }
+.fa-set-row input[type="range"] { width: 100%; accent-color: var(--wood); }
+.fa-set-row .why {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-muted);
+}
 .fa-set-row select {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   font-family: 'Inter', sans-serif;
   font-size: 12.5px;
   padding: 5px 7px;
@@ -1036,21 +1099,26 @@
   border: 1px solid #ccc;
   background: white;
 }
-.fa-set-checks {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding-top: 9px;
+/* A switch sits at the left of the control column, where a slider's own
+   left end is, rather than floating in the middle of a 220px track. */
+.fa-set-row .c { justify-self: start; accent-color: var(--wood); cursor: pointer; }
+.fa-set-row label.l { cursor: pointer; }
+/* Four columns need 400px of track before the first word of an
+   explanation; a phone has less than that for the whole card. So the
+   row folds into three lines — the name and its reading, what it does,
+   then the control across the full width — placed by hand, because the
+   reading has to come up beside the name from further down the row. */
+@media (max-width: 700px) {
+  .fa-set-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    padding: 9px 0;
+  }
+  .fa-set-row .l { grid-area: 1 / 1; }
+  .fa-set-row .v { grid-area: 1 / 2; }
+  .fa-set-row .why { grid-area: 2 / 1 / auto / -1; }
+  .fa-set-row input, .fa-set-row select { grid-area: 3 / 1 / auto / -1; }
 }
-.fa-set-checks label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: #6b5f42;
-  cursor: pointer;
-}
-.fa-set-checks input { accent-color: var(--wood); }
 .fa-set-note {
   font-size: 11px;
   font-style: italic;
@@ -1099,10 +1167,22 @@
   gap: 6px;
 }
 .fa-log-row:last-child { border-bottom: none; }
+/* A line of prose has a measure of its own, whatever the page is wide. */
+.fa-log-row span:last-child { max-width: 96ch; }
 .fa-log-row .k {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px;
   color: var(--barn-red);
   flex-shrink: 0;
+  padding-top: 2px;
+}
+/* When it happened, on the farm's clock. Fixed width so the lines read
+   as a column of times rather than a ragged left margin. */
+.fa-log-row .t {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+  width: 62px;
   padding-top: 2px;
 }
